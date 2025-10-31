@@ -112,7 +112,7 @@ void gnss_log_fix_summary_if_changed(void)
     }
 
     const char* overall = gnss_has_fix ? "FIXED" : "NO FIX";
-    ESP_LOGI(TAG, "FIX SUMMARY: RMC=%s | GGA:%s | GSA:%s => %s", rmc_str, gga_str, gsa_str, overall);
+    GNSS_PARSE_LOG("FIX SUMMARY: RMC=%s | GGA:%s | GSA:%s => %s", rmc_str, gga_str, gsa_str, overall);
 
     // 更新快照
     last_has_fix   = gnss_has_fix;
@@ -409,7 +409,7 @@ void gnss_parse_and_log_rmc(const char* nmea)
     const char* spd_kn   = fields[7];
     const char* crs_deg  = fields[8];
 
-    ESP_LOGI(TAG, "RMC: time=%s status=%s lat=%s%s lng=%s%s spd(kn)=%s crs=%s", 
+    GNSS_PARSE_LOG("RMC: time=%s status=%s lat=%s%s lng=%s%s spd(kn)=%s crs=%s", 
              time_utc, status, lat, lat_hemi, lng, lng_hemi, spd_kn, crs_deg);
 
     // RMC 状态：A=有效，V=无效
@@ -476,7 +476,7 @@ void gnss_parse_and_log_gga(const char* nmea)
     gnss_hdop  = hdop;
     gnss_has_fix = (fixq > 0);
 
-    ESP_LOGI(TAG, "GGA: fixQ=%d sats=%d HDOP=%.1f -> %s",
+    GNSS_PARSE_LOG("GGA: fixQ=%d sats=%d HDOP=%.1f -> %s",
              fixq, sats, hdop, gnss_has_fix ? "FIXED" : "NO FIX");
 
     if (prev_fix != gnss_has_fix) {
@@ -518,7 +518,7 @@ void gnss_parse_and_log_gsa(const char* nmea)
     if (hdop > 0.0f) gnss_hdop = hdop;
 
     const char* dim_str = (dim == 3) ? "3D" : (dim == 2) ? "2D" : "NO FIX";
-    ESP_LOGI(TAG, "GSA: dim=%s (val=%d) HDOP=%.1f", dim_str, dim, gnss_hdop);
+    GNSS_PARSE_LOG("GSA: dim=%s (val=%d) HDOP=%.1f", dim_str, dim, gnss_hdop);
 
     if (dim >= 2) gnss_has_fix = true;
     gnss_seen_gsa = true;

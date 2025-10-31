@@ -34,6 +34,14 @@
 #define RS_EN 7
 #endif
 
+// 运动传感器引脚配置 (LIS2DH12TR)
+#ifndef MOTION_SENSOR_SDA_PIN
+#define MOTION_SENSOR_SDA_PIN 14    // I2C SDA
+#endif
+#ifndef MOTION_SENSOR_SCL_PIN
+#define MOTION_SENSOR_SCL_PIN 15    // I2C SCL
+#endif
+
 // UART 配置
 #ifndef EX_UART_NUM
 #define EX_UART_NUM UART_NUM_2   // GNSS 使用 UART2
@@ -90,6 +98,11 @@
 #define GNSS_UBX_LOG_ENABLED 1
 #endif
 
+// GNSS 解析日志控制 (控制RMC/GGA/GSA解析结果输出)
+#ifndef GNSS_PARSE_LOG_ENABLED
+#define GNSS_PARSE_LOG_ENABLED 0  // 默认关闭，减少日志输出
+#endif
+
 #if GNSS_RAW_LOG_ENABLED
 #define GNSS_RAW_LOG(fmt, ...) ESP_LOGI("GNSS_RAW", fmt, ##__VA_ARGS__)
 #else
@@ -100,6 +113,12 @@
 #define GNSS_UBX_LOG(fmt, ...) ESP_LOGI("GNSS_UBX", fmt, ##__VA_ARGS__)
 #else
 #define GNSS_UBX_LOG(...) do { } while (0)
+#endif
+
+#if GNSS_PARSE_LOG_ENABLED
+#define GNSS_PARSE_LOG(fmt, ...) ESP_LOGI("GNSS", fmt, ##__VA_ARGS__)
+#else
+#define GNSS_PARSE_LOG(...) do { } while (0)
 #endif
 
 // 低功耗测试参数

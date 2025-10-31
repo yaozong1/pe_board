@@ -11,6 +11,7 @@
 #include "mqtt_module.h"
 #include "battery_module.h"
 #include "timer_module.h"
+#include "motion_sensor.h"
 
 static const char *TAG = "APP";
 
@@ -34,10 +35,20 @@ void app_main(void)
     timer_init();
     timer_start();
     
-    // 6. 启动GNSS任务
+    // 6. 初始化运动传感器
+    if (motion_sensor_init()) {
+        ESP_LOGI(TAG, "Motion sensor initialized successfully!");
+        
+        // 启动运动传感器任务
+        xTaskCreate(motion_sensor_task, "motion_task", 4096, NULL, 5, NULL);
+    } else {
+        ESP_LOGE(TAG, "Motion sensor initialization failed - continuing without it");
+    }
+    
+    // 7. 启动GNSS任务
     xTaskCreate(gnss_task, "gnss_task", 4096, NULL, 8, NULL);
     
-    // 7. 启动GPS+MQTT周期任务
+    // 8. 启动GPS+MQTT周期任务
     xTaskCreate(gps_mqtt_cycle_task, "gps_cycle", 4096, NULL, 9, NULL);
     
     // 等待系统稳定
