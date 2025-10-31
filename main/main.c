@@ -4,7 +4,7 @@
 #include "freertos/task.h"
 #include "driver/gpio.h"
 
-// 模块头文件
+// 模块头文件、
 #include "hardware_config.h"
 #include "gpio_module.h"
 #include "gnss_module.h"
