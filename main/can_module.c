@@ -9,6 +9,7 @@
 #include "freertos/task.h"
 #include "freertos/queue.h"
 #include <string.h>
+#include <stdio.h>
 
 static const char *TAG = "CAN";
 
@@ -384,6 +385,20 @@ static void handle_can_alerts(uint32_t alerts)
         while (can_receive_message(&message, 0)) {
             if (rx_callback) {
                 rx_callback(&message);
+            } else {
+                // 默认打印一条简洁的接收日志，便于现场验证
+                char data_str[3 * 8 + 1];
+                int pos = 0;
+                for (uint8_t i = 0; i < message.data_length && i < 8; i++) {
+                    pos += snprintf(&data_str[pos], sizeof(data_str) - pos, "%02X ", message.data[i]);
+                    if (pos >= (int)sizeof(data_str) - 1) break;
+                }
+                data_str[pos] = '\0';
+                ESP_LOGI(TAG, "RX: %s ID=0x%08lX DLC=%u DATA: %s",
+                         message.format == CAN_FRAME_EXT ? "EXT" : "STD",
+                         (unsigned long)message.identifier,
+                         (unsigned)message.data_length,
+                         data_str);
             }
         }
     }
