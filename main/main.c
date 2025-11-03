@@ -15,12 +15,23 @@
 #include "motion_sensor.h"
 #include "can_module.h"
 #include "rs485_module.h"
+#include "eg915_selftest.h"
 
 static const char *TAG = "APP";
 
 void app_main(void)
 {
     ESP_LOGI(TAG, "PE Board Application Starting...");
+    
+#if ENABLE_EG915_AT_SELFTEST
+    // 独立EG915 AT握手自测模式：仅初始化GPIO与UART1，并启动自测任务
+    gpio_init();
+    start_eg915_at_selftest();
+    ESP_LOGI(TAG, "EG915 AT self-test mode enabled (ENABLE_EG915_AT_SELFTEST=1)");
+    while (1) {
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
+    }
+#else
     
     // 1. 初始化GPIO
     gpio_init();
@@ -157,4 +168,5 @@ void app_main(void)
         // 主循环延时
         vTaskDelay(1000 / portTICK_PERIOD_MS);
     }
+#endif // ENABLE_EG915_AT_SELFTEST
 }

@@ -84,6 +84,11 @@
 #define ENABLE_GNSS_LP 0              // 关闭旧的低功耗循环，改用周期上报任务
 #endif
 
+// EG915 AT 自测开关：置为 1 时仅运行握手自测任务，便于独立验证串口与模组联通
+#ifndef ENABLE_EG915_AT_SELFTEST
+#define ENABLE_EG915_AT_SELFTEST 1
+#endif
+
 // 通用 UNUSED_ATTR，避免静态函数/变量未用告警
 #ifndef UNUSED_ATTR
 #define UNUSED_ATTR __attribute__((unused, used))
@@ -95,7 +100,7 @@
 #endif
 
 #ifndef GNSS_UBX_LOG_ENABLED
-#define GNSS_UBX_LOG_ENABLED 1
+#define GNSS_UBX_LOG_ENABLED 0
 #endif
 
 // GNSS 解析日志控制 (控制RMC/GGA/GSA解析结果输出)
