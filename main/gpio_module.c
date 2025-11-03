@@ -16,7 +16,7 @@ void gpio_init(void)
     gpio_set_direction(QT_POWER_PIN, GPIO_MODE_OUTPUT);
     gpio_set_level(QT_POWER_PIN, 0);
 
-    gpio_set_direction(LED_PIN_EN_4V, GPIO_MODE_OUTPUT);
+    gpio_set_direction(POWER_EN_4V, GPIO_MODE_OUTPUT);
     gpio_set_direction(LED_PIN_EN_GPS, GPIO_MODE_OUTPUT);
     gpio_set_direction(LED_PIN_EN_3V3_LDO, GPIO_MODE_OUTPUT);
     gpio_set_direction(LED_PIN_EN_GNSS, GPIO_MODE_OUTPUT);
@@ -33,7 +33,7 @@ void gpio_init(void)
 
 void power_control_init(void)
 {
-    gpio_set_level(LED_PIN_EN_4V, 1);
+    gpio_set_level(POWER_EN_4V, 1);
     gpio_set_level(LED_PIN_EN_GPS, 1);
     gpio_set_level(LED_PIN_EN_3V3_LDO, 1);
     gpio_set_level(LED_PIN_EN_GNSS, 1);

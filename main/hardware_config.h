@@ -21,8 +21,8 @@
 #ifndef BUTTON_PIN
 #define BUTTON_PIN 0
 #endif
-#ifndef LED_PIN_EN_4V
-#define LED_PIN_EN_4V 4
+#ifndef POWER_EN_4V
+#define POWER_EN_4V 16
 #endif
 #ifndef LED_PIN_EN_GPS
 #define LED_PIN_EN_GPS 5
