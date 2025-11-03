@@ -12,6 +12,7 @@
 #include "battery_module.h"
 #include "timer_module.h"
 #include "motion_sensor.h"
+#include "can_module.h"
 
 static const char *TAG = "APP";
 
@@ -21,6 +22,18 @@ void app_main(void)
     
     // 1. 初始化GPIO
     gpio_init();
+
+    // 1.1 初始化并启动 CAN（250Kbps）
+    if (can_module_init(CAN_BITRATE_250K)) {
+        if (can_module_start()) {
+            // 启动 CAN 告警处理任务
+            xTaskCreate(can_task, "can_task", 4096, NULL, 8, NULL);
+        } else {
+            ESP_LOGE(TAG, "CAN start failed");
+        }
+    } else {
+        ESP_LOGE(TAG, "CAN init failed");
+    }
     
     // 2. 初始化GNSS模块
     gnss_init();
@@ -58,6 +71,14 @@ void app_main(void)
 
     // 主循环
     while (1) {
+        // 每2秒发送一次 CAN 测试帧，用于验证总线健康
+        static int can_tick_1s = 0; // 依赖下方主循环1秒延时
+        can_tick_1s++;
+        if (can_tick_1s >= 2) {
+            can_test_send_periodic();
+            can_tick_1s = 0;
+        }
+
         // 读取 ADC 值进行电池监控
         uint32_t adc_reading = read_adc_raw();
         uint32_t voltage_mv = read_adc_voltage_mv();

@@ -4,4 +4,5 @@ idf_component_register(SRCS "motion_sensor.c" "main.c"
                            "battery_module.c"
                            "gpio_module.c"
                            "timer_module.c"
+                           "can_module.c"
                     INCLUDE_DIRS "")

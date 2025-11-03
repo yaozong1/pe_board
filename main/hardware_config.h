@@ -154,4 +154,14 @@
 #define MQTT_TOPIC_BATTERY "fleet/PE-001/battery"
 #endif
 
+#ifndef CAN_TX_PIN
+#define CAN_TX_PIN 40               // ESP32 TX -> TJA1051 TXD
+#endif
+#ifndef CAN_RX_PIN
+#define CAN_RX_PIN 39               // ESP32 RX <- TJA1051 RXD
+#endif
+#ifndef CAN_EN_PIN
+#define CAN_EN_PIN 41               // TJA1051 Silent/Standby 控制脚（低电平启用）
+#endif
+
 #endif // HARDWARE_CONFIG_H
