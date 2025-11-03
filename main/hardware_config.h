@@ -154,6 +154,18 @@
 #define MQTT_TOPIC_BATTERY "fleet/PE-001/battery"
 #endif
 
+#ifndef RS485_UART_NUM
+#define RS485_UART_NUM UART_NUM_0    // 默认使用 UART0（与 USB-Serial-JTAG 分离）
+#endif
+#ifndef RS485_TX_PIN
+#define RS485_TX_PIN 10              // RS485 DI <- ESP32 TX (IO10)
+#endif
+#ifndef RS485_RX_PIN
+#define RS485_RX_PIN 9               // RS485 RO -> ESP32 RX (IO9)
+#endif
+// 可选：若有方向控制脚，解除注释并设置引脚号
+// #define RS485_DE_RE_PIN  -1        // 高电平发送，低电平接收
+
 #ifndef CAN_TX_PIN
 #define CAN_TX_PIN 40               // ESP32 TX -> TJA1051 TXD
 #endif

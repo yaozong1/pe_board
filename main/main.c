@@ -3,6 +3,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "driver/gpio.h"
+#include <string.h>
 
 // 模块头文件、
 #include "hardware_config.h"
@@ -13,6 +14,7 @@
 #include "timer_module.h"
 #include "motion_sensor.h"
 #include "can_module.h"
+#include "rs485_module.h"
 
 static const char *TAG = "APP";
 
@@ -33,6 +35,13 @@ void app_main(void)
         }
     } else {
         ESP_LOGE(TAG, "CAN init failed");
+    }
+
+    // 1.2 初始化 RS485（UART 封装），默认 115200 波特率
+    if (!rs485_init(115200)) {
+        ESP_LOGE(TAG, "RS485 init failed");
+    } else {
+        ESP_LOGI(TAG, "RS485 initialized");
     }
     
     // 2. 初始化GNSS模块
@@ -77,6 +86,43 @@ void app_main(void)
         if (can_tick_1s >= 2) {
             can_test_send_periodic();
             can_tick_1s = 0;
+        }
+
+        // 每2秒发送一次 RS485 测试数据，并尝试读取回环/对端回应
+        static int rs485_tick_1s = 0;
+        static uint32_t rs485_counter = 0;
+        rs485_tick_1s++;
+        if (rs485_tick_1s >= 2) {
+            // 固定负载：按需求发送 "AA BB CC DD EE FF GG HH"
+            const char *pattern = "AA BB CC DD EE FF GG HH";
+            int written = rs485_write((const uint8_t*)pattern, (int)strlen(pattern), 200); // 200 ticks 超时
+            if (written >= 0) {
+                ESP_LOGI("RS485", "TX %d bytes: %s", written, pattern);
+            } else {
+                ESP_LOGE("RS485", "TX failed");
+            }
+            rs485_counter++;
+            rs485_tick_1s = 0;
+
+            // 尝试读取可用数据（非阻塞/短超时），并打印
+            for (int i = 0; i < 3; ++i) { // 最多尝试三次，避免阻塞主循环
+                uint8_t buf[128];
+                int n = rs485_read(buf, sizeof(buf), 0); // 0 tick 非阻塞
+                if (n > 0) {
+                    // 打印前 32B，避免刷屏
+                    int print_n = n > 32 ? 32 : n;
+                    char hex[3 * 32 + 1];
+                    int pos = 0;
+                    for (int j = 0; j < print_n; ++j) {
+                        pos += snprintf(&hex[pos], sizeof(hex) - pos, "%02X ", buf[j]);
+                        if (pos >= (int)sizeof(hex) - 1) break;
+                    }
+                    hex[pos] = '\0';
+                    ESP_LOGI("RS485", "RX %d bytes: %s%s", n, hex, (n > 32 ? "..." : ""));
+                } else {
+                    break; // 没数据立即退出
+                }
+            }
         }
 
         // 读取 ADC 值进行电池监控
