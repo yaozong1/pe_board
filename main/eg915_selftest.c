@@ -5,11 +5,38 @@
 #include "freertos/task.h"
 #include "driver/uart.h"
 #include "driver/gpio.h"
+#include <string.h>
 
 #include "hardware_config.h"
-#include "mqtt_module.h"  // 复用 send_at_command / wait_for_ok / uart_read_response / modem_power_cycle / mqtt_init
+#include "mqtt_module.h"   // 复用 send_at_command / wait_for_ok / uart_read_response / modem_power_cycle / mqtt_init
+#include "motion_sensor.h" // 运动传感器自测
+#include "rs485_module.h"  // RS485 自测
+#include "can_module.h"    // CAN 自测
+#include "battery_module.h"// 电池/ADC 自测
+#include "gnss_module.h"   // GNSS 自测（直接读UART）
 
-static const char *TAG_ST = "EG915_TEST";
+static const char *TAG_ST = "SELFTEST";
+
+typedef struct {
+    bool eg915_ok;
+    // Motion
+    bool motion_ok;
+    float motion_mag;
+    // RS485
+    bool rs485_inited;
+    int  rs485_rx_bytes;
+    int  rs485_written;
+    // CAN
+    bool can_inited;
+    bool can_started;
+    int  can_state; // cast of can_state_t
+    // GNSS
+    bool gnss_uart_ok;
+    int  gnss_bytes;
+    // Battery
+    bool battery_ok;
+    float battery_v;
+} selftest_report_t;
 
 bool eg915_at_handshake_once(unsigned timeout_ms, int retries)
 {
@@ -42,10 +69,142 @@ static void drain_boot_urcs(uint32_t ms)
     }
 }
 
+static bool selftest_motion(selftest_report_t *r)
+{
+    bool ok = motion_sensor_init();
+    if (!ok) {
+        r->motion_ok = false;
+        r->motion_mag = 0.0f;
+        ESP_LOGW(TAG_ST, "Motion sensor init failed");
+        return false;
+    }
+    // 读一次加速度
+    lis2dh12_accel_data_t acc;
+    if (lis2dh12_read_accel_data(&acc)) {
+        float mag = lis2dh12_calculate_magnitude(&acc);
+        r->motion_ok = true;
+        r->motion_mag = mag;
+        ESP_LOGI(TAG_ST, "Motion: X=%.3fg Y=%.3fg Z=%.3fg Mag=%.3fg", acc.x, acc.y, acc.z, mag);
+        return true;
+    }
+    r->motion_ok = false;
+    r->motion_mag = 0.0f;
+    ESP_LOGW(TAG_ST, "Motion sensor read failed");
+    return false;
+}
+
+static void selftest_rs485(selftest_report_t *r)
+{
+    r->rs485_inited = rs485_init(115200);
+    r->rs485_rx_bytes = 0;
+    r->rs485_written = -1;
+    if (!r->rs485_inited) {
+        ESP_LOGW(TAG_ST, "RS485 init failed");
+        return;
+    }
+    const char *pattern = "SELFTEST";
+    int w = rs485_write((const uint8_t*)pattern, (int)strlen(pattern), pdMS_TO_TICKS(100));
+    r->rs485_written = w;
+    ESP_LOGI(TAG_ST, "RS485 write %d bytes", w);
+    uint8_t buf[64];
+    int n = rs485_read(buf, sizeof(buf), pdMS_TO_TICKS(50));
+    if (n > 0) {
+        r->rs485_rx_bytes = n;
+        ESP_LOGI(TAG_ST, "RS485 read %d bytes", n);
+    }
+    rs485_deinit();
+}
+
+static void selftest_can(selftest_report_t *r)
+{
+    r->can_inited = can_module_init(CAN_BITRATE_250K);
+    r->can_started = false;
+    r->can_state = -1;
+    if (!r->can_inited) {
+        ESP_LOGW(TAG_ST, "CAN init failed");
+        return;
+    }
+    r->can_started = can_module_start();
+    can_state_t st = can_get_state();
+    r->can_state = (int)st;
+    ESP_LOGI(TAG_ST, "CAN state=%d started=%d", r->can_state, r->can_started);
+    // 结束后清理
+    can_module_stop();
+    can_module_deinit();
+}
+
+static void selftest_battery(selftest_report_t *r)
+{
+    battery_init();
+    float v = read_battery_voltage();
+    r->battery_v = v;
+    r->battery_ok = (v > 0.1f);
+    ESP_LOGI(TAG_ST, "Battery voltage=%.2fV (ok=%d)", v, r->battery_ok);
+}
+
+static void selftest_gnss(selftest_report_t *r)
+{
+    // 初始化GNSS UART并上电
+    gnss_init();
+    gnss_enable(true);
+    gnss_reset_release();
+    vTaskDelay(pdMS_TO_TICKS(500));
+
+    // 尝试读取少量数据
+    uint8_t buf[128];
+    int total = 0;
+    TickType_t t0 = xTaskGetTickCount();
+    while ((xTaskGetTickCount() - t0) < pdMS_TO_TICKS(1500)) {
+        int n = uart_read_bytes(GNSS_UART_NUM, buf, sizeof(buf), pdMS_TO_TICKS(100));
+        if (n > 0) { total += n; if (total >= 32) break; }
+    }
+    r->gnss_bytes = total;
+    r->gnss_uart_ok = (total > 0);
+    ESP_LOGI(TAG_ST, "GNSS UART bytes=%d (ok=%d)", total, r->gnss_uart_ok);
+}
+
+static void print_summary(const selftest_report_t *r)
+{
+    ESP_LOGI(TAG_ST,
+        "SELFTEST SUMMARY:\n"
+        "{\n"
+        "  \"eg915_ok\": %s,\n"
+        "  \"motion\": { \"ok\": %s, \"mag\": %.3f },\n"
+        "  \"rs485\": { \"inited\": %s, \"written\": %d, \"rx_bytes\": %d },\n"
+        "  \"can\": { \"inited\": %s, \"started\": %s, \"state\": %d },\n"
+        "  \"gnss\": { \"uart_ok\": %s, \"bytes\": %d },\n"
+        "  \"battery\": { \"ok\": %s, \"voltage\": %.2f }\n"
+        "}\n",
+        r->eg915_ok ? "true" : "false",
+        r->motion_ok ? "true" : "false", r->motion_mag,
+        r->rs485_inited ? "true" : "false", r->rs485_written, r->rs485_rx_bytes,
+        r->can_inited ? "true" : "false", r->can_started ? "true" : "false", r->can_state,
+        r->gnss_uart_ok ? "true" : "false", r->gnss_bytes,
+        r->battery_ok ? "true" : "false", r->battery_v
+    );
+}
+
+static void print_human_summary(const selftest_report_t *r)
+{
+    bool rs485_ok = r->rs485_inited && (r->rs485_written >= 0);
+    bool can_ok   = r->can_inited && r->can_started; // 总线状态可能受外部影响，这里只看初始化/启动
+    bool overall  = r->eg915_ok && r->motion_ok && rs485_ok && can_ok && r->gnss_uart_ok && r->battery_ok;
+
+    ESP_LOGI(TAG_ST, "================= SELFTEST RESULT =================");
+    ESP_LOGI(TAG_ST, "EG915       : %s", r->eg915_ok     ? "PASS" : "FAIL");
+    ESP_LOGI(TAG_ST, "Motion      : %s (|a|=%.3fg)", r->motion_ok ? "PASS" : "FAIL", r->motion_mag);
+    ESP_LOGI(TAG_ST, "RS485       : %s (written=%d, rx=%d)", rs485_ok ? "PASS" : "FAIL", r->rs485_written, r->rs485_rx_bytes);
+    ESP_LOGI(TAG_ST, "CAN         : %s (inited=%d, started=%d, state=%d)", can_ok ? "PASS" : "FAIL", r->can_inited, r->can_started, r->can_state);
+    ESP_LOGI(TAG_ST, "GNSS UART   : %s (bytes=%d)", r->gnss_uart_ok ? "PASS" : "FAIL", r->gnss_bytes);
+    ESP_LOGI(TAG_ST, "Battery/ADC : %s (V=%.2f)", r->battery_ok ? "PASS" : "FAIL", r->battery_v);
+    ESP_LOGI(TAG_ST, "---------------------------------------------------");
+    ESP_LOGI(TAG_ST, "OVERALL     : %s", overall ? "PASS" : "FAIL");
+}
+
 static void eg915_at_selftest_task(void *pv)
 {
     (void)pv;
-    ESP_LOGI(TAG_ST, "EG915 AT handshake self-test starting...");
+    ESP_LOGI(TAG_ST, "Self-test starting (EG915 + peripherals)...");
 
     // 1) 确保GPIO初始化完成（app_main里会调用gpio_init）
     // 2) 初始化 UART1（与MQTT模块一致的串口设置）
@@ -61,13 +220,20 @@ static void eg915_at_selftest_task(void *pv)
     drain_boot_urcs(3000);
 
     // 5) 进行AT握手（最多5次，每次1秒超时）
-    bool ok = eg915_at_handshake_once(1000, 5);
+    selftest_report_t rep = {0};
+    rep.eg915_ok = eg915_at_handshake_once(1000, 5);
+    ESP_LOGI(TAG_ST, "EG915 AT: %s", rep.eg915_ok ? "PASS" : "FAIL");
 
-    if (ok) {
-        ESP_LOGI(TAG_ST, "EG915 AT self-test: PASS");
-    } else {
-        ESP_LOGE(TAG_ST, "EG915 AT self-test: FAIL");
-    }
+    // 6) 其他模块自测（尽量互不依赖）
+    selftest_motion(&rep);
+    selftest_rs485(&rep);
+    selftest_can(&rep);
+    selftest_battery(&rep);
+    selftest_gnss(&rep);
+
+    // 7) 汇总输出
+    print_summary(&rep);
+    print_human_summary(&rep);
 
     // 自测完成后可选择保持任务或退出；这里退出任务
     vTaskDelete(NULL);

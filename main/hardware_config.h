@@ -13,7 +13,8 @@
 #endif
 
 #ifndef LED_PIN_1
-#define LED_PIN_1 1
+// 注意：GPIO1 被用于 ADC1_CHANNEL_0（电池采样），避免冲突，这里改用 GPIO2 作为 LED1
+#define LED_PIN_1 2
 #endif
 #ifndef LED_PIN_3
 #define LED_PIN_3 3
