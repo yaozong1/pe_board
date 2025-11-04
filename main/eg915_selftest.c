@@ -260,10 +260,15 @@ void Selftest_task(void *pv)
 
     // 循环执行完整自测，每 3 秒重跑一次
     while (1) {
-        // 3) 通过PWRKEY脉冲拉起模组，保证干净启动
-        ESP_LOGI(TAG_ST, "Power-cycling EG915U via PWRKEY...");
-        modem_power_cycle();
-        vTaskDelay(pdMS_TO_TICKS(2000));
+        // 3) 仅在检测到模组关闭时才执行 PWRKEY 上电，避免偶数轮把模组关掉
+        int pwr_state = gpio_get_level(EG915U_POWER);
+        if (pwr_state == 0) {
+            ESP_LOGI(TAG_ST, "EG915U power state: OFF (IO48=0). Pulsing PWRKEY to turn ON...");
+            modem_power_cycle();
+            vTaskDelay(pdMS_TO_TICKS(2000));
+        } else {
+            ESP_LOGI(TAG_ST, "EG915U power state: ON (IO48=1). Skip PWRKEY pulse this cycle.");
+        }
 
         // 4) 清理上电URC，避免干扰握手解析
         ESP_LOGI(TAG_ST, "Draining boot URCs for 3s...");
