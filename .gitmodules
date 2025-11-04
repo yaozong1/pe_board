@@ -1,0 +1,6 @@
+[submodule "tools/factory_gui"]
+	path = tools/factory_gui
+	url = file:///C:/Users/h1576/Desktop/Roam/pe_code/pe_board/tools/factory_gui
+[submodule "tools/test_jig_firmware"]
+	path = tools/test_jig_firmware
+	url = file:///C:/Users/h1576/Desktop/Roam/pe_code/pe_board/tools/test_jig_firmware
