@@ -24,10 +24,10 @@ void app_main(void)
     ESP_LOGI(TAG, "PE Board Application Starting...");
     
 #if ENABLE_EG915_AT_SELFTEST
-    // 独立EG915 AT握手自测模式：仅初始化GPIO与UART1，并启动自测任务
+    // 自测模式：仅初始化GPIO，然后直接创建自测任务，任务名称为 selftest_task
     gpio_init();
-    start_eg915_at_selftest();
-    ESP_LOGI(TAG, "EG915 AT self-test mode enabled (ENABLE_EG915_AT_SELFTEST=1)");
+    xTaskCreate(Selftest_task, "selftest_task", 4096, NULL, 10, NULL);
+    ESP_LOGI(TAG, "Self-test task created: selftest_task (ENABLE_EG915_AT_SELFTEST=1)");
     while (1) {
         vTaskDelay(1000 / portTICK_PERIOD_MS);
     }

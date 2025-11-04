@@ -26,10 +26,12 @@ typedef struct {
     bool rs485_inited;
     int  rs485_rx_bytes;
     int  rs485_written;
+    bool rs485_pass;
     // CAN
     bool can_inited;
     bool can_started;
     int  can_state; // cast of can_state_t
+    bool can_pass;
     // GNSS
     bool gnss_uart_ok;
     int  gnss_bytes;
@@ -71,7 +73,12 @@ static void drain_boot_urcs(uint32_t ms)
 
 static bool selftest_motion(selftest_report_t *r)
 {
-    bool ok = motion_sensor_init();
+    static bool motion_inited = false;
+    bool ok = true;
+    if (!motion_inited) {
+        ok = motion_sensor_init();
+        motion_inited = ok;
+    }
     if (!ok) {
         r->motion_ok = false;
         r->motion_mag = 0.0f;
@@ -98,19 +105,34 @@ static void selftest_rs485(selftest_report_t *r)
     r->rs485_inited = rs485_init(115200);
     r->rs485_rx_bytes = 0;
     r->rs485_written = -1;
+    r->rs485_pass = false;
     if (!r->rs485_inited) {
         ESP_LOGW(TAG_ST, "RS485 init failed");
         return;
     }
-    const char *pattern = "SELFTEST";
-    int w = rs485_write((const uint8_t*)pattern, (int)strlen(pattern), pdMS_TO_TICKS(100));
+    // 严格要求收到 01 02 03 04 05 06 07 08
+    const uint8_t patt[8] = {1,2,3,4,5,6,7,8};
+    int w = rs485_write(patt, sizeof(patt), pdMS_TO_TICKS(100));
     r->rs485_written = w;
     ESP_LOGI(TAG_ST, "RS485 write %d bytes", w);
     uint8_t buf[64];
-    int n = rs485_read(buf, sizeof(buf), pdMS_TO_TICKS(50));
-    if (n > 0) {
-        r->rs485_rx_bytes = n;
-        ESP_LOGI(TAG_ST, "RS485 read %d bytes", n);
+    int total = 0;
+    TickType_t t0 = xTaskGetTickCount();
+    while ((xTaskGetTickCount() - t0) < pdMS_TO_TICKS(2000)) {
+        int n = rs485_read(buf + total, sizeof(buf) - total, pdMS_TO_TICKS(50));
+        if (n > 0) {
+            total += n;
+            r->rs485_rx_bytes = total;
+            // 滑动窗口匹配
+            for (int i = 0; i + 8 <= total; ++i) {
+                if (memcmp(buf + i, patt, 8) == 0) {
+                    r->rs485_pass = true;
+                    break;
+                }
+            }
+            if (r->rs485_pass) break;
+            if (total >= (int)sizeof(buf)) break;
+        }
     }
     rs485_deinit();
 }
@@ -120,6 +142,7 @@ static void selftest_can(selftest_report_t *r)
     r->can_inited = can_module_init(CAN_BITRATE_250K);
     r->can_started = false;
     r->can_state = -1;
+    r->can_pass = false;
     if (!r->can_inited) {
         ESP_LOGW(TAG_ST, "CAN init failed");
         return;
@@ -128,6 +151,29 @@ static void selftest_can(selftest_report_t *r)
     can_state_t st = can_get_state();
     r->can_state = (int)st;
     ESP_LOGI(TAG_ST, "CAN state=%d started=%d", r->can_state, r->can_started);
+
+    if (r->can_started) {
+        can_message_t msg = {
+            .identifier = 0x321,
+            .format = CAN_FRAME_STD,
+            .type = CAN_MSG_TYPE_DATA,
+            .data_length = 8,
+            .data = {1,2,3,4,5,6,7,8}
+        };
+        (void)can_send_message(&msg, 100);
+
+        TickType_t t0 = xTaskGetTickCount();
+        can_message_t rx;
+        while ((xTaskGetTickCount() - t0) < pdMS_TO_TICKS(2000)) {
+            if (can_receive_message(&rx, 50)) {
+                if (rx.data_length == 8 && memcmp(rx.data, msg.data, 8) == 0) {
+                    r->can_pass = true;
+                    break;
+                }
+            }
+        }
+    }
+
     // 结束后清理
     can_module_stop();
     can_module_deinit();
@@ -135,7 +181,8 @@ static void selftest_can(selftest_report_t *r)
 
 static void selftest_battery(selftest_report_t *r)
 {
-    battery_init();
+    static bool bat_inited = false;
+    if (!bat_inited) { battery_init(); bat_inited = true; }
     float v = read_battery_voltage();
     r->battery_v = v;
     r->battery_ok = (v > 0.1f);
@@ -145,7 +192,8 @@ static void selftest_battery(selftest_report_t *r)
 static void selftest_gnss(selftest_report_t *r)
 {
     // 初始化GNSS UART并上电
-    gnss_init();
+    static bool gnss_inited = false;
+    if (!gnss_inited) { gnss_init(); gnss_inited = true; }
     gnss_enable(true);
     gnss_reset_release();
     vTaskDelay(pdMS_TO_TICKS(500));
@@ -170,15 +218,15 @@ static void print_summary(const selftest_report_t *r)
         "{\n"
         "  \"eg915_ok\": %s,\n"
         "  \"motion\": { \"ok\": %s, \"mag\": %.3f },\n"
-        "  \"rs485\": { \"inited\": %s, \"written\": %d, \"rx_bytes\": %d },\n"
-        "  \"can\": { \"inited\": %s, \"started\": %s, \"state\": %d },\n"
+    "  \"rs485\": { \"inited\": %s, \"written\": %d, \"rx_bytes\": %d, \"pass\": %s },\n"
+    "  \"can\": { \"inited\": %s, \"started\": %s, \"state\": %d, \"pass\": %s },\n"
         "  \"gnss\": { \"uart_ok\": %s, \"bytes\": %d },\n"
         "  \"battery\": { \"ok\": %s, \"voltage\": %.2f }\n"
         "}\n",
         r->eg915_ok ? "true" : "false",
         r->motion_ok ? "true" : "false", r->motion_mag,
-        r->rs485_inited ? "true" : "false", r->rs485_written, r->rs485_rx_bytes,
-        r->can_inited ? "true" : "false", r->can_started ? "true" : "false", r->can_state,
+    r->rs485_inited ? "true" : "false", r->rs485_written, r->rs485_rx_bytes, r->rs485_pass ? "true" : "false",
+    r->can_inited ? "true" : "false", r->can_started ? "true" : "false", r->can_state, r->can_pass ? "true" : "false",
         r->gnss_uart_ok ? "true" : "false", r->gnss_bytes,
         r->battery_ok ? "true" : "false", r->battery_v
     );
@@ -186,8 +234,8 @@ static void print_summary(const selftest_report_t *r)
 
 static void print_human_summary(const selftest_report_t *r)
 {
-    bool rs485_ok = r->rs485_inited && (r->rs485_written >= 0);
-    bool can_ok   = r->can_inited && r->can_started; // 总线状态可能受外部影响，这里只看初始化/启动
+    bool rs485_ok = r->rs485_pass; // 严格要求收到 01..08
+    bool can_ok   = r->can_pass;   // 严格要求收到 01..08
     bool overall  = r->eg915_ok && r->motion_ok && rs485_ok && can_ok && r->gnss_uart_ok && r->battery_ok;
 
     ESP_LOGI(TAG_ST, "================= SELFTEST RESULT =================");
@@ -201,7 +249,7 @@ static void print_human_summary(const selftest_report_t *r)
     ESP_LOGI(TAG_ST, "OVERALL     : %s", overall ? "PASS" : "FAIL");
 }
 
-static void eg915_at_selftest_task(void *pv)
+void Selftest_task(void *pv)
 {
     (void)pv;
     ESP_LOGI(TAG_ST, "Self-test starting (EG915 + peripherals)...");
@@ -210,36 +258,36 @@ static void eg915_at_selftest_task(void *pv)
     // 2) 初始化 UART1（与MQTT模块一致的串口设置）
     mqtt_init();
 
-    // 3) 通过PWRKEY脉冲拉起模组，保证干净启动
-    ESP_LOGI(TAG_ST, "Power-cycling EG915U via PWRKEY...");
-    modem_power_cycle();
-    vTaskDelay(pdMS_TO_TICKS(2000));
+    // 循环执行完整自测，每 3 秒重跑一次
+    while (1) {
+        // 3) 通过PWRKEY脉冲拉起模组，保证干净启动
+        ESP_LOGI(TAG_ST, "Power-cycling EG915U via PWRKEY...");
+        modem_power_cycle();
+        vTaskDelay(pdMS_TO_TICKS(2000));
 
-    // 4) 清理上电URC，避免干扰握手解析
-    ESP_LOGI(TAG_ST, "Draining boot URCs for 3s...");
-    drain_boot_urcs(3000);
+        // 4) 清理上电URC，避免干扰握手解析
+        ESP_LOGI(TAG_ST, "Draining boot URCs for 3s...");
+        drain_boot_urcs(3000);
 
-    // 5) 进行AT握手（最多5次，每次1秒超时）
-    selftest_report_t rep = {0};
-    rep.eg915_ok = eg915_at_handshake_once(1000, 5);
-    ESP_LOGI(TAG_ST, "EG915 AT: %s", rep.eg915_ok ? "PASS" : "FAIL");
+        // 5) 进行AT握手（最多5次，每次1秒超时）
+        selftest_report_t rep = (selftest_report_t){0};
+        rep.eg915_ok = eg915_at_handshake_once(1000, 5);
+        ESP_LOGI(TAG_ST, "EG915 AT: %s", rep.eg915_ok ? "PASS" : "FAIL");
 
-    // 6) 其他模块自测（尽量互不依赖）
-    selftest_motion(&rep);
-    selftest_rs485(&rep);
-    selftest_can(&rep);
-    selftest_battery(&rep);
-    selftest_gnss(&rep);
+        // 6) 其他模块自测（尽量互不依赖）
+        selftest_motion(&rep);
+        selftest_rs485(&rep);
+        selftest_can(&rep);
+        selftest_battery(&rep);
+        selftest_gnss(&rep);
 
-    // 7) 汇总输出
-    print_summary(&rep);
-    print_human_summary(&rep);
+        // 7) 汇总输出
+        print_summary(&rep);
+        print_human_summary(&rep);
 
-    // 自测完成后可选择保持任务或退出；这里退出任务
-    vTaskDelete(NULL);
+        // 8) 3 秒后重新测试
+        vTaskDelay(pdMS_TO_TICKS(3000));
+    }
 }
 
-void start_eg915_at_selftest(void)
-{
-    xTaskCreate(eg915_at_selftest_task, "eg915_at_test", 4096, NULL, 10, NULL);
-}
+// start_eg915_at_selftest removed; task is created directly from app_main
