@@ -172,6 +172,15 @@
 // 可选：若有方向控制脚，解除注释并设置引脚号
 // #define RS485_DE_RE_PIN  -1        // 高电平发送，低电平接收
 
+// 工厂治具对接：保留 UART0 的默认引脚用于量产烧录与结果输出
+// ESP32-S3 缺省 U0TXD/U0RXD 建议接至治具：U0TXD=GPIO43, U0RXD=GPIO44
+#ifndef U0TXD_PIN
+#define U0TXD_PIN 43
+#endif
+#ifndef U0RXD_PIN
+#define U0RXD_PIN 44
+#endif
+
 #ifndef CAN_TX_PIN
 #define CAN_TX_PIN 40               // ESP32 TX -> TJA1051 TXD
 #endif

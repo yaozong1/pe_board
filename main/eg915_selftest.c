@@ -249,6 +249,66 @@ static void print_human_summary(const selftest_report_t *r)
     ESP_LOGI(TAG_ST, "OVERALL     : %s", overall ? "PASS" : "FAIL");
 }
 
+// 将 JSON 摘要通过 UART0 的 U0TXD/U0RXD(43/44) 发送给治具
+static void emit_summary_over_uart0(const selftest_report_t *r)
+{
+    // 构造与 print_summary 相同的 JSON 文本
+    char json_buf[512];
+    int n = snprintf(json_buf, sizeof(json_buf),
+        "SELFTEST SUMMARY:\n"
+        "{\n"
+        "  \"eg915_ok\": %s,\n"
+        "  \"motion\": { \"ok\": %s, \"mag\": %.3f },\n"
+        "  \"rs485\": { \"inited\": %s, \"written\": %d, \"rx_bytes\": %d, \"pass\": %s },\n"
+        "  \"can\": { \"inited\": %s, \"started\": %s, \"state\": %d, \"pass\": %s },\n"
+        "  \"gnss\": { \"uart_ok\": %s, \"bytes\": %d },\n"
+        "  \"battery\": { \"ok\": %s, \"voltage\": %.2f }\n"
+        "}\n",
+        r->eg915_ok ? "true" : "false",
+        r->motion_ok ? "true" : "false", r->motion_mag,
+        r->rs485_inited ? "true" : "false", r->rs485_written, r->rs485_rx_bytes, r->rs485_pass ? "true" : "false",
+        r->can_inited ? "true" : "false", r->can_started ? "true" : "false", r->can_state, r->can_pass ? "true" : "false",
+        r->gnss_uart_ok ? "true" : "false", r->gnss_bytes,
+        r->battery_ok ? "true" : "false", r->battery_v
+    );
+    if (n <= 0) return;
+
+    // 独立安装 UART0 驱动到 43/44，发送后删除，避免与 RS485/其他占用长期冲突
+    uart_config_t cfg = {
+        .baud_rate = 115200,
+        .data_bits = UART_DATA_8_BITS,
+        .parity    = UART_PARITY_DISABLE,
+        .stop_bits = UART_STOP_BITS_1,
+        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
+        .source_clk = UART_SCLK_DEFAULT,
+    };
+
+    // 若 UART0 之前被其他模块占用/删除，重新安装；失败则放弃透传
+    // 为避免 RS485 总线上也出现同样的数据：
+    // 1) 显式复位 RS485_TX_PIN 的矩阵映射，避免残留的 UART0 TX 映射仍驱动 GPIO10
+    // 2) 临时拉低 RS_EN（若存在），让收发器进入接收/高阻状态
+    int rs_en_prev = -1;
+#ifdef RS_EN
+    rs_en_prev = gpio_get_level(RS_EN);
+    gpio_set_level(RS_EN, 0);
+#endif
+    gpio_reset_pin(RS485_TX_PIN);
+
+    if (uart_driver_install(UART_NUM_0, 1024, 0, 0, NULL, 0) == ESP_OK) {
+        uart_param_config(UART_NUM_0, &cfg);
+        uart_set_pin(UART_NUM_0, U0TXD_PIN, U0RXD_PIN, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+        uart_write_bytes(UART_NUM_0, json_buf, strlen(json_buf));
+        uart_wait_tx_done(UART_NUM_0, pdMS_TO_TICKS(200));
+        uart_driver_delete(UART_NUM_0);
+    }
+
+#ifdef RS_EN
+    if (rs_en_prev >= 0) {
+        gpio_set_level(RS_EN, rs_en_prev);
+    }
+#endif
+}
+
 void Selftest_task(void *pv)
 {
     (void)pv;
@@ -286,9 +346,11 @@ void Selftest_task(void *pv)
         selftest_battery(&rep);
         selftest_gnss(&rep);
 
-        // 7) 汇总输出
+    // 7) 汇总输出
         print_summary(&rep);
         print_human_summary(&rep);
+    // 7.1) 通过 UART0 的 43/44 将 JSON 摘要发给工厂治具
+    emit_summary_over_uart0(&rep);
 
         // 8) 3 秒后重新测试
         vTaskDelay(pdMS_TO_TICKS(3000));
