@@ -143,15 +143,38 @@ static void selftest_rs485(selftest_report_t *r)
 
 static void selftest_can(selftest_report_t *r)
 {
+    // 检测CAN_EN_PIN (GPIO41) 的电平状态
+    int can_en_level = gpio_get_level(CAN_EN_PIN);
+    ESP_LOGI(TAG_ST, "CAN_EN_PIN (IO%d) level before init: %d (should be 0 for normal, 1 for shutdown)", CAN_EN_PIN, can_en_level);
+    
+    if (can_en_level != 0) {
+        ESP_LOGE(TAG_ST, "ERROR: CAN_EN_PIN should be LOW(0) but is HIGH(1) - transceiver is in shutdown mode!");
+    }
+    
     r->can_inited = can_module_init(CAN_BITRATE_250K);
     r->can_started = false;
     r->can_state = -1;
     r->can_pass = false;
     if (!r->can_inited) {
         ESP_LOGW(TAG_ST, "CAN init failed");
+        // 再次检测GPIO41,看是否被错误拉高
+        can_en_level = gpio_get_level(CAN_EN_PIN);
+        ESP_LOGE(TAG_ST, "CAN_EN_PIN (IO%d) level after init failure: %d", CAN_EN_PIN, can_en_level);
         return;
     }
+    
+    // 初始化后再次检测
+    can_en_level = gpio_get_level(CAN_EN_PIN);
+    ESP_LOGI(TAG_ST, "CAN_EN_PIN (IO%d) level after init: %d", CAN_EN_PIN, can_en_level);
+    
     r->can_started = can_module_start();
+    if (!r->can_started) {
+        ESP_LOGW(TAG_ST, "CAN start failed");
+        // 启动失败后检测GPIO41
+        can_en_level = gpio_get_level(CAN_EN_PIN);
+        ESP_LOGE(TAG_ST, "CAN_EN_PIN (IO%d) level after start failure: %d", CAN_EN_PIN, can_en_level);
+    }
+    
     can_state_t st = can_get_state();
     r->can_state = (int)st;
     ESP_LOGI(TAG_ST, "CAN state=%d started=%d", r->can_state, r->can_started);
@@ -268,6 +291,66 @@ static void print_human_summary(const selftest_report_t *r)
     ESP_LOGI(TAG_ST, "OVERALL     : %s", overall ? "PASS" : "FAIL");
 }
 
+// 在COM6(USB-JTAG)上输出清晰的格式化表格,便于用户直接通过串口查看
+static void print_com6_formatted_result(const selftest_report_t *r)
+{
+    bool rs485_ok = r->rs485_pass;
+    bool can_ok   = r->can_pass;
+    bool ign_ok   = r->ign_pass;
+    bool overall  = r->eg915_ok && r->motion_ok && rs485_ok && can_ok && r->gnss_uart_ok && r->battery_ok && ign_ok;
+
+    // 使用ESP_LOGI输出格式化表格,确保在COM6上可见
+    ESP_LOGI(TAG_ST, "========== FORMATTED REPORT START ==========");
+    ESP_LOGI(TAG_ST, " ");
+    ESP_LOGI(TAG_ST, "╔═══════════════════════════════════════════════════════════════╗");
+    ESP_LOGI(TAG_ST, "║              PE BOARD FACTORY SELF-TEST REPORT                ║");
+    ESP_LOGI(TAG_ST, "╠═══════════════════════════════════════════════════════════════╣");
+    ESP_LOGI(TAG_ST, "║ Test Item          │ Result  │ Details                        ║");
+    ESP_LOGI(TAG_ST, "╟────────────────────┼─────────┼────────────────────────────────╢");
+    
+    ESP_LOGI(TAG_ST, "║ EG915 Module       │ %-7s │ AT command response            ║", 
+           r->eg915_ok ? "PASS" : "FAIL");
+    
+    ESP_LOGI(TAG_ST, "║ Motion Sensor      │ %-7s │ Magnitude: %.3f g             ║", 
+           r->motion_ok ? "PASS" : "FAIL", r->motion_mag);
+    
+    ESP_LOGI(TAG_ST, "║ RS485 Loopback     │ %-7s │ TX:%d RX:%d bytes            ║", 
+           rs485_ok ? "PASS" : "FAIL", r->rs485_written, r->rs485_rx_bytes);
+    
+    ESP_LOGI(TAG_ST, "║ CAN Bus Loopback   │ %-7s │ Init:%d Start:%d State:%d     ║", 
+           can_ok ? "PASS" : "FAIL", r->can_inited, r->can_started, r->can_state);
+    
+    ESP_LOGI(TAG_ST, "║ GNSS UART          │ %-7s │ Received: %d bytes            ║", 
+           r->gnss_uart_ok ? "PASS" : "FAIL", r->gnss_bytes);
+    
+    ESP_LOGI(TAG_ST, "║ Battery Voltage    │ %-7s │ Voltage: %.2f V               ║", 
+           r->battery_ok ? "PASS" : "FAIL", r->battery_v);
+    
+    ESP_LOGI(TAG_ST, "║ IGN Optocoupler    │ %-7s │ Signal transition detected     ║", 
+           ign_ok ? "PASS" : "FAIL");
+    
+    ESP_LOGI(TAG_ST, "╠════════════════════╧═════════╧════════════════════════════════╣");
+    ESP_LOGI(TAG_ST, "║ OVERALL RESULT:  %-44s  ║", 
+           overall ? "✓ ALL TESTS PASSED" : "✗ SOME TESTS FAILED");
+    ESP_LOGI(TAG_ST, "╚═══════════════════════════════════════════════════════════════╝");
+    ESP_LOGI(TAG_ST, " ");
+    
+    // 额外输出调试详情(如果有失败项)
+    if (!overall) {
+        ESP_LOGI(TAG_ST, "┌─── FAILURE DETAILS ───────────────────────────────────────────┐");
+        if (!r->eg915_ok)     ESP_LOGI(TAG_ST, "│ ✗ EG915: No AT response - check module power/UART connection │");
+        if (!r->motion_ok)    ESP_LOGI(TAG_ST, "│ ✗ Motion: Sensor read failed - check I2C connection          │");
+        if (!rs485_ok)        ESP_LOGI(TAG_ST, "│ ✗ RS485: Pattern mismatch - check loopback wiring            │");
+        if (!can_ok)          ESP_LOGI(TAG_ST, "│ ✗ CAN: Loopback failed - check bus termination/GPIO41        │");
+        if (!r->gnss_uart_ok) ESP_LOGI(TAG_ST, "│ ✗ GNSS: No data received - check module power/UART           │");
+        if (!r->battery_ok)   ESP_LOGI(TAG_ST, "│ ✗ Battery: Low voltage - check ADC/power supply              │");
+        if (!ign_ok)          ESP_LOGI(TAG_ST, "│ ✗ IGN: No transition - check optocoupler/jig connection      │");
+        ESP_LOGI(TAG_ST, "└───────────────────────────────────────────────────────────────┘");
+        ESP_LOGI(TAG_ST, " ");
+    }
+    ESP_LOGI(TAG_ST, "========== FORMATTED REPORT END ==========");
+}
+
 // 将 JSON 摘要通过 UART0 的 U0TXD/U0RXD(43/44) 发送给治具
 static void emit_summary_over_uart0(const selftest_report_t *r)
 {
@@ -369,8 +452,12 @@ void Selftest_task(void *pv)
         selftest_ign(&rep);  // IGN光耦测试
 
     // 7) 汇总输出
-        print_summary(&rep);
-        print_human_summary(&rep);
+        print_summary(&rep);          // JSON格式(用于程序解析)
+        vTaskDelay(pdMS_TO_TICKS(100)); // 确保JSON输出完成
+        print_human_summary(&rep);    // 简洁日志格式(用于ESP_LOG查看)
+        vTaskDelay(pdMS_TO_TICKS(100)); // 确保简洁汇总输出完成
+        print_com6_formatted_result(&rep);  // 格式化表格(用于COM6串口直接查看)
+        vTaskDelay(pdMS_TO_TICKS(100)); // 确保表格输出完成
     // 7.1) 通过 UART0 的 43/44 将 JSON 摘要发给工厂治具
     emit_summary_over_uart0(&rep);
 

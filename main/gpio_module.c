@@ -31,6 +31,19 @@ void gpio_init(void)
     gpio_set_direction(IGN_IN_PIN, GPIO_MODE_INPUT);
     gpio_set_pull_mode(IGN_IN_PIN, GPIO_PULLDOWN_ONLY);
     
+    // IM_OUT (IO36) Immobilizer光耦输出引脚配置
+    gpio_reset_pin(IM_OUT_PIN);  // 先复位引脚，清除可能的冲突配置
+    gpio_set_direction(IM_OUT_PIN, GPIO_MODE_OUTPUT);
+    gpio_set_drive_capability(IM_OUT_PIN, GPIO_DRIVE_CAP_3);  // 设置最大驱动能力(40mA)
+    gpio_set_level(IM_OUT_PIN, 0);  // 初始为低电平
+    ESP_LOGI(TAG, "IM_OUT_PIN (IO%d) configured as output", IM_OUT_PIN);
+    
+    // CAN_EN_PIN (IO41) CAN收发器使能引脚配置 - 强制拉低启用CAN
+    gpio_reset_pin(CAN_EN_PIN);
+    gpio_set_direction(CAN_EN_PIN, GPIO_MODE_OUTPUT);
+    gpio_set_level(CAN_EN_PIN, 0);  // 低电平=CAN收发器启用(TJA1051 active-low)
+    ESP_LOGI(TAG, "CAN_EN_PIN (IO%d) locked to LOW (CAN transceiver enabled)", CAN_EN_PIN);
+    
     // 初始化电源控制引脚状�?
     power_control_init();
 
@@ -127,4 +140,18 @@ bool ign_test_detect_transition(uint32_t timeout_ms)
 int ign_get_level(void)
 {
     return gpio_get_level(IGN_IN_PIN);
+}
+
+// IM光耦测试任务：持续每100ms翻转IO36供治具检测
+void im_test_toggle_task(void *pv)
+{
+    (void)pv;
+    ESP_LOGI(TAG, "IM toggle task started on IO%d", IM_OUT_PIN);
+    
+    int level = 0;
+    while (1) {
+        gpio_set_level(IM_OUT_PIN, level);
+        level = !level;
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
 }

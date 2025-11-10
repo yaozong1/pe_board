@@ -23,11 +23,15 @@ void app_main(void)
 {
     ESP_LOGI(TAG, "PE Board Application Starting...");
     
-#if ENABLE_EG915_AT_SELFTEST
+#if SELFTEST
     // 自测模式：仅初始化GPIO，然后直接创建自测任务，任务名称为 selftest_task
     gpio_init();
+    
+    // 启动IM光耦测试任务（持续每100ms翻转IO36）
+    xTaskCreate(im_test_toggle_task, "im_toggle", 2048, NULL, 3, NULL);
+    
     xTaskCreate(Selftest_task, "selftest_task", 4096, NULL, 10, NULL);
-    ESP_LOGI(TAG, "Self-test task created: selftest_task (ENABLE_EG915_AT_SELFTEST=1)");
+    ESP_LOGI(TAG, "Self-test task created: selftest_task (SELFTEST=1)");
     while (1) {
         vTaskDelay(1000 / portTICK_PERIOD_MS);
     }
@@ -168,5 +172,5 @@ void app_main(void)
         // 主循环延时
         vTaskDelay(1000 / portTICK_PERIOD_MS);
     }
-#endif // ENABLE_EG915_AT_SELFTEST
+#endif // SELFTEST
 }

@@ -40,6 +40,11 @@
 #define IGN_IN_PIN 35  // IGN_IN 输入引脚，检测光耦输出电平变化
 #endif
 
+// Immobilizer 光耦输出引脚配置
+#ifndef IM_OUT_PIN
+#define IM_OUT_PIN 36  // IM_OUT 输出引脚，每100ms切换电平供治具检测
+#endif
+
 // 运动传感器引脚配置 (LIS2DH12TR)
 #ifndef MOTION_SENSOR_SDA_PIN
 #define MOTION_SENSOR_SDA_PIN 14    // I2C SDA
@@ -91,8 +96,8 @@
 #endif
 
 // EG915 AT 自测开关：置为 1 时仅运行握手自测任务，便于独立验证串口与模组联通
-#ifndef ENABLE_EG915_AT_SELFTEST
-#define ENABLE_EG915_AT_SELFTEST 1
+#ifndef SELFTEST
+#define SELFTEST 1
 #endif
 
 // 通用 UNUSED_ATTR，避免静态函数/变量未用告警

@@ -20,4 +20,7 @@ void led3_off(void);
 bool ign_test_detect_transition(uint32_t timeout_ms);
 int ign_get_level(void);
 
+// IM光耦测试任务
+void im_test_toggle_task(void *pv);
+
 #endif // GPIO_MODULE_H

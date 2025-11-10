@@ -1,7 +1,7 @@
 {
     "version":            "1",
     "project_name":       "pe_board",
-    "project_version":    "4a9cfdc-dirty",
+    "project_version":    "1b7fdc5-dirty",
     "project_path":       "C:/Users/h1576/Desktop/Roam/pe_code/pe_board",
     "idf_path":           "C:/Users/h1576/esp/esp-idf",
     "build_dir":          "C:/Users/h1576/Desktop/Roam/pe_code/pe_board/build",

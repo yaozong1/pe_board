@@ -52,25 +52,11 @@ bool can_transceiver_enable(bool enable)
 
 static bool configure_gpio_pins(void)
 {
-    // 配置CAN使能引脚
-    gpio_config_t en_config = {
-        .pin_bit_mask = (1ULL << CAN_EN_PIN),
-        .mode = GPIO_MODE_OUTPUT,
-        .pull_up_en = GPIO_PULLUP_DISABLE,
-        .pull_down_en = GPIO_PULLDOWN_DISABLE,
-        .intr_type = GPIO_INTR_DISABLE
-    };
+    // CAN_EN_PIN 已在 gpio_init() 中初始化并锁定为 LOW
+    // 这里不再配置,避免重复切换导致收发器进入shutdown
     
-    esp_err_t ret = gpio_config(&en_config);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to configure CAN enable pin: %s", esp_err_to_name(ret));
-        return false;
-    }
-    
-    // 初始禁用收发器
-    can_transceiver_enable(false);
-    
-    ESP_LOGI(TAG, "CAN GPIO configured: TX=%d, RX=%d, EN=%d", CAN_TX_PIN, CAN_RX_PIN, CAN_EN_PIN);
+    ESP_LOGI(TAG, "CAN GPIO configured: TX=%d, RX=%d, EN=%d (EN pin locked by gpio_init)", 
+             CAN_TX_PIN, CAN_RX_PIN, CAN_EN_PIN);
     return true;
 }
 
@@ -90,11 +76,7 @@ bool can_module_init(uint32_t bitrate)
         return false;
     }
     
-    // 先启用CAN收发器
-    if (!can_transceiver_enable(true)) {
-        ESP_LOGE(TAG, "Failed to enable CAN transceiver");
-        return false;
-    }
+    // CAN_EN_PIN 已在 gpio_init() 中被锁定为 LOW,不需要再调用 can_transceiver_enable()
     
     // 等待收发器稳定
     vTaskDelay(10); // ticks
@@ -118,7 +100,7 @@ bool can_module_init(uint32_t bitrate)
     esp_err_t ret = twai_driver_install(&g_config, &t_config, &f_config);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to install TWAI driver: %s", esp_err_to_name(ret));
-        can_transceiver_enable(false);
+        // CAN_EN_PIN保持LOW,不调用can_transceiver_enable(false)避免关闭收发器
         return false;
     }
     
@@ -141,16 +123,13 @@ bool can_module_start(void)
         return true;
     }
     
-    // 启用CAN收发器
-    if (!can_transceiver_enable(true)) {
-        return false;
-    }
+    // CAN_EN_PIN 已在 gpio_init() 中被锁定为 LOW,不需要再调用 can_transceiver_enable()
     
     // 启动TWAI驱动
     esp_err_t ret = twai_start();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to start TWAI driver: %s", esp_err_to_name(ret));
-        can_transceiver_enable(false);
+        // CAN_EN_PIN保持LOW,不调用can_transceiver_enable(false)避免关闭收发器
         return false;
     }
     
@@ -173,8 +152,7 @@ bool can_module_stop(void)
         return false;
     }
     
-    // 禁用CAN收发器
-    can_transceiver_enable(false);
+    // CAN_EN_PIN保持LOW,不调用can_transceiver_enable(false),让收发器始终启用
     
     can_running = false;
     ESP_LOGI(TAG, "CAN module stopped");
