@@ -29,10 +29,15 @@
 #define LED_PIN_EN_GPS 5
 #endif
 #ifndef LED_PIN_EN_3V3_LDO
-#define LED_PIN_EN_3V3_LDO 6
+#define LED_PIN_EN_3V3_LDO 17  // 3V3_LDO使能引脚（之前错误地定义为IO6）
 #endif
 #ifndef RS_EN
 #define RS_EN 7
+#endif
+
+// IGN 光耦检测引脚配置
+#ifndef IGN_IN_PIN
+#define IGN_IN_PIN 35  // IGN_IN 输入引脚，检测光耦输出电平变化
 #endif
 
 // 运动传感器引脚配置 (LIS2DH12TR)

@@ -14,6 +14,7 @@
 #include "can_module.h"    // CAN 自测
 #include "battery_module.h"// 电池/ADC 自测
 #include "gnss_module.h"   // GNSS 自测（直接读UART）
+#include "gpio_module.h"   // IGN 光耦自测
 
 static const char *TAG_ST = "SELFTEST";
 
@@ -38,6 +39,9 @@ typedef struct {
     // Battery
     bool battery_ok;
     float battery_v;
+    // IGN optocoupler
+    bool ign_tested;
+    bool ign_pass;
 } selftest_report_t;
 
 bool eg915_at_handshake_once(unsigned timeout_ms, int retries)
@@ -211,6 +215,17 @@ static void selftest_gnss(selftest_report_t *r)
     ESP_LOGI(TAG_ST, "GNSS UART bytes=%d (ok=%d)", total, r->gnss_uart_ok);
 }
 
+static void selftest_ign(selftest_report_t *r)
+{
+    r->ign_tested = true;
+    // 测试IGN光耦：等待5秒检测电平变化（高->低->高）
+    // 治具的IGN_TEST_PIN每100ms切换，所以5秒内应该能检测到完整的转换
+    ESP_LOGI(TAG_ST, "Testing IGN optocoupler (timeout=5000ms)...");
+    bool pass = ign_test_detect_transition(5000);
+    r->ign_pass = pass;
+    ESP_LOGI(TAG_ST, "IGN optocoupler: %s", pass ? "PASS" : "FAIL");
+}
+
 static void print_summary(const selftest_report_t *r)
 {
     ESP_LOGI(TAG_ST,
@@ -221,14 +236,16 @@ static void print_summary(const selftest_report_t *r)
     "  \"rs485\": { \"inited\": %s, \"written\": %d, \"rx_bytes\": %d, \"pass\": %s },\n"
     "  \"can\": { \"inited\": %s, \"started\": %s, \"state\": %d, \"pass\": %s },\n"
         "  \"gnss\": { \"uart_ok\": %s, \"bytes\": %d },\n"
-        "  \"battery\": { \"ok\": %s, \"voltage\": %.2f }\n"
+        "  \"battery\": { \"ok\": %s, \"voltage\": %.2f },\n"
+        "  \"ign\": { \"tested\": %s, \"pass\": %s }\n"
         "}\n",
         r->eg915_ok ? "true" : "false",
         r->motion_ok ? "true" : "false", r->motion_mag,
     r->rs485_inited ? "true" : "false", r->rs485_written, r->rs485_rx_bytes, r->rs485_pass ? "true" : "false",
     r->can_inited ? "true" : "false", r->can_started ? "true" : "false", r->can_state, r->can_pass ? "true" : "false",
         r->gnss_uart_ok ? "true" : "false", r->gnss_bytes,
-        r->battery_ok ? "true" : "false", r->battery_v
+        r->battery_ok ? "true" : "false", r->battery_v,
+        r->ign_tested ? "true" : "false", r->ign_pass ? "true" : "false"
     );
 }
 
@@ -236,7 +253,8 @@ static void print_human_summary(const selftest_report_t *r)
 {
     bool rs485_ok = r->rs485_pass; // 严格要求收到 01..08
     bool can_ok   = r->can_pass;   // 严格要求收到 01..08
-    bool overall  = r->eg915_ok && r->motion_ok && rs485_ok && can_ok && r->gnss_uart_ok && r->battery_ok;
+    bool ign_ok   = r->ign_pass;   // IGN光耦测试通过
+    bool overall  = r->eg915_ok && r->motion_ok && rs485_ok && can_ok && r->gnss_uart_ok && r->battery_ok && ign_ok;
 
     ESP_LOGI(TAG_ST, "================= SELFTEST RESULT =================");
     ESP_LOGI(TAG_ST, "EG915       : %s", r->eg915_ok     ? "PASS" : "FAIL");
@@ -245,6 +263,7 @@ static void print_human_summary(const selftest_report_t *r)
     ESP_LOGI(TAG_ST, "CAN         : %s (inited=%d, started=%d, state=%d)", can_ok ? "PASS" : "FAIL", r->can_inited, r->can_started, r->can_state);
     ESP_LOGI(TAG_ST, "GNSS UART   : %s (bytes=%d)", r->gnss_uart_ok ? "PASS" : "FAIL", r->gnss_bytes);
     ESP_LOGI(TAG_ST, "Battery/ADC : %s (V=%.2f)", r->battery_ok ? "PASS" : "FAIL", r->battery_v);
+    ESP_LOGI(TAG_ST, "IGN Opto    : %s", ign_ok ? "PASS" : "FAIL");
     ESP_LOGI(TAG_ST, "---------------------------------------------------");
     ESP_LOGI(TAG_ST, "OVERALL     : %s", overall ? "PASS" : "FAIL");
 }
@@ -262,14 +281,16 @@ static void emit_summary_over_uart0(const selftest_report_t *r)
         "  \"rs485\": { \"inited\": %s, \"written\": %d, \"rx_bytes\": %d, \"pass\": %s },\n"
         "  \"can\": { \"inited\": %s, \"started\": %s, \"state\": %d, \"pass\": %s },\n"
         "  \"gnss\": { \"uart_ok\": %s, \"bytes\": %d },\n"
-        "  \"battery\": { \"ok\": %s, \"voltage\": %.2f }\n"
+        "  \"battery\": { \"ok\": %s, \"voltage\": %.2f },\n"
+        "  \"ign\": { \"tested\": %s, \"pass\": %s }\n"
         "}\n",
         r->eg915_ok ? "true" : "false",
         r->motion_ok ? "true" : "false", r->motion_mag,
         r->rs485_inited ? "true" : "false", r->rs485_written, r->rs485_rx_bytes, r->rs485_pass ? "true" : "false",
         r->can_inited ? "true" : "false", r->can_started ? "true" : "false", r->can_state, r->can_pass ? "true" : "false",
         r->gnss_uart_ok ? "true" : "false", r->gnss_bytes,
-        r->battery_ok ? "true" : "false", r->battery_v
+        r->battery_ok ? "true" : "false", r->battery_v,
+        r->ign_tested ? "true" : "false", r->ign_pass ? "true" : "false"
     );
     if (n <= 0) return;
 
@@ -345,6 +366,7 @@ void Selftest_task(void *pv)
         selftest_can(&rep);
         selftest_battery(&rep);
         selftest_gnss(&rep);
+        selftest_ign(&rep);  // IGN光耦测试
 
     // 7) 汇总输出
         print_summary(&rep);

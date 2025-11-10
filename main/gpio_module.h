@@ -16,4 +16,8 @@ void led1_off(void);
 void led3_on(void);
 void led3_off(void);
 
+// IGN光耦测试函数
+bool ign_test_detect_transition(uint32_t timeout_ms);
+int ign_get_level(void);
+
 #endif // GPIO_MODULE_H
