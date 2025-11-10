@@ -452,14 +452,14 @@ void Selftest_task(void *pv)
         selftest_ign(&rep);  // IGN光耦测试
 
     // 7) 汇总输出
-        print_summary(&rep);          // JSON格式(用于程序解析)
-        vTaskDelay(pdMS_TO_TICKS(100)); // 确保JSON输出完成
+    // print_summary(&rep);          // JSON格式(用于程序解析)
+    // vTaskDelay(pdMS_TO_TICKS(100)); // 确保JSON输出完成
         print_human_summary(&rep);    // 简洁日志格式(用于ESP_LOG查看)
         vTaskDelay(pdMS_TO_TICKS(100)); // 确保简洁汇总输出完成
-        print_com6_formatted_result(&rep);  // 格式化表格(用于COM6串口直接查看)
-        vTaskDelay(pdMS_TO_TICKS(100)); // 确保表格输出完成
+        // print_com6_formatted_result(&rep);  // 格式化表格(用于COM6串口直接查看)
+        // vTaskDelay(pdMS_TO_TICKS(100)); // 确保表格输出完成
     // 7.1) 通过 UART0 的 43/44 将 JSON 摘要发给工厂治具
-    emit_summary_over_uart0(&rep);
+        emit_summary_over_uart0(&rep);
 
         // 8) 3 秒后重新测试
         vTaskDelay(pdMS_TO_TICKS(3000));
