@@ -180,6 +180,16 @@ static void selftest_can(selftest_report_t *r)
     ESP_LOGI(TAG_ST, "CAN state=%d started=%d", r->can_state, r->can_started);
 
     if (r->can_started) {
+        // 发送前先清空接收队列,避免读到旧数据
+        can_message_t dummy;
+        int flushed = 0;
+        while (can_receive_message(&dummy, 10)) {
+            flushed++;
+        }
+        if (flushed > 0) {
+            ESP_LOGW(TAG_ST, "CAN: Flushed %d old messages from RX queue", flushed);
+        }
+        
         can_message_t msg = {
             .identifier = 0x321,
             .format = CAN_FRAME_STD,
@@ -187,17 +197,34 @@ static void selftest_can(selftest_report_t *r)
             .data_length = 8,
             .data = {1,2,3,4,5,6,7,8}
         };
-        (void)can_send_message(&msg, 100);
+        
+        bool sent = can_send_message(&msg, 100);
+        ESP_LOGI(TAG_ST, "CAN send result: %s", sent ? "OK" : "FAIL");
 
         TickType_t t0 = xTaskGetTickCount();
         can_message_t rx;
+        int rx_count = 0;
         while ((xTaskGetTickCount() - t0) < pdMS_TO_TICKS(2000)) {
             if (can_receive_message(&rx, 50)) {
+                rx_count++;
+                ESP_LOGI(TAG_ST, "CAN RX#%d: ID=0x%03lx, len=%d, data=[%02X %02X %02X %02X %02X %02X %02X %02X]",
+                    rx_count, (unsigned long)rx.identifier, rx.data_length,
+                    rx.data[0], rx.data[1], rx.data[2], rx.data[3],
+                    rx.data[4], rx.data[5], rx.data[6], rx.data[7]);
+                
+                // 严格匹配: 必须是8字节且内容完全一致
                 if (rx.data_length == 8 && memcmp(rx.data, msg.data, 8) == 0) {
+                    ESP_LOGI(TAG_ST, "CAN: Received matching pattern {01 02 03 04 05 06 07 08} - PASS");
                     r->can_pass = true;
                     break;
+                } else {
+                    ESP_LOGW(TAG_ST, "CAN: Data mismatch, continue waiting...");
                 }
             }
+        }
+        
+        if (!r->can_pass) {
+            ESP_LOGW(TAG_ST, "CAN: No matching loopback received (rx_count=%d)", rx_count);
         }
     }
 
