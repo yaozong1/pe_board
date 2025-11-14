@@ -23,6 +23,8 @@ static const char *TAG_ST = "SELFTEST";
 
 typedef struct {
     bool eg915_ok;
+    char eg915_imei[32];  // IMEI number
+    char eg915_iccid[32]; // ICCID number
     // Motion
     bool motion_ok;
     float motion_mag;
@@ -60,6 +62,76 @@ bool eg915_at_handshake_once(unsigned timeout_ms, int retries)
         vTaskDelay(pdMS_TO_TICKS(300));
     }
     ESP_LOGW(TAG_ST, "AT handshake failed after %d attempts", retries);
+    return false;
+}
+
+// Get IMEI from EG915 module
+static bool eg915_get_imei(char *imei_buf, size_t buf_size)
+{
+    if (!imei_buf || buf_size < 16) return false;
+    
+    memset(imei_buf, 0, buf_size);
+    ESP_LOGI(TAG_ST, "Getting IMEI...");
+    send_at_command("AT+GSN");
+    
+    char resp[128];
+    int len = uart_read_response(resp, sizeof(resp), 2000);
+    if (len > 0) {
+        // Find IMEI (usually 15 digits)
+        char *p = resp;
+        while (*p) {
+            if (*p >= '0' && *p <= '9') {
+                int digits = 0;
+                char *start = p;
+                while (p[digits] >= '0' && p[digits] <= '9') digits++;
+                if (digits == 15) {  // IMEI is 15 digits
+                    strncpy(imei_buf, start, 15);
+                    imei_buf[15] = '\0';
+                    ESP_LOGI(TAG_ST, "IMEI: %s", imei_buf);
+                    return true;
+                }
+                p += digits;
+            } else {
+                p++;
+            }
+        }
+    }
+    ESP_LOGW(TAG_ST, "Failed to get IMEI");
+    strcpy(imei_buf, "N/A");
+    return false;
+}
+
+// Get ICCID from SIM card
+static bool eg915_get_iccid(char *iccid_buf, size_t buf_size)
+{
+    if (!iccid_buf || buf_size < 20) return false;
+    
+    memset(iccid_buf, 0, buf_size);
+    ESP_LOGI(TAG_ST, "Getting ICCID...");
+    send_at_command("AT+CCID");
+    
+    char resp[128];
+    int len = uart_read_response(resp, sizeof(resp), 2000);
+    if (len > 0) {
+        // Find ICCID (usually 19-20 digits)
+        // Format might be +CCID: 89860123456789012345
+        char *p = strstr(resp, "+CCID:");
+        if (p) {
+            p += 6;  // Skip "+CCID:"
+            while (*p == ' ') p++;  // Skip spaces
+            
+            int digits = 0;
+            while (p[digits] >= '0' && p[digits] <= '9') digits++;
+            if (digits >= 19 && digits <= 20) {
+                strncpy(iccid_buf, p, digits);
+                iccid_buf[digits] = '\0';
+                ESP_LOGI(TAG_ST, "ICCID: %s", iccid_buf);
+                return true;
+            }
+        }
+    }
+    ESP_LOGW(TAG_ST, "Failed to get ICCID");
+    strcpy(iccid_buf, "N/A");
     return false;
 }
 
@@ -285,6 +357,8 @@ static void print_summary(const selftest_report_t *r)
         "SELFTEST SUMMARY:\n"
         "{\n"
         "  \"eg915_ok\": %s,\n"
+        "  \"eg915_imei\": \"%s\",\n"
+        "  \"eg915_iccid\": \"%s\",\n"
         "  \"motion\": { \"ok\": %s, \"mag\": %.3f },\n"
     "  \"rs485\": { \"inited\": %s, \"written\": %d, \"rx_bytes\": %d, \"pass\": %s },\n"
     "  \"can\": { \"inited\": %s, \"started\": %s, \"state\": %d, \"pass\": %s },\n"
@@ -293,6 +367,8 @@ static void print_summary(const selftest_report_t *r)
         "  \"ign\": { \"tested\": %s, \"pass\": %s }\n"
         "}\n",
         r->eg915_ok ? "true" : "false",
+        r->eg915_imei,
+        r->eg915_iccid,
         r->motion_ok ? "true" : "false", r->motion_mag,
     r->rs485_inited ? "true" : "false", r->rs485_written, r->rs485_rx_bytes, r->rs485_pass ? "true" : "false",
     r->can_inited ? "true" : "false", r->can_started ? "true" : "false", r->can_state, r->can_pass ? "true" : "false",
@@ -390,6 +466,8 @@ static void emit_summary_over_uart0(const selftest_report_t *r)
         "SELFTEST SUMMARY:\n"
         "{\n"
         "  \"eg915_ok\": %s,\n"
+        "  \"eg915_imei\": \"%s\",\n"
+        "  \"eg915_iccid\": \"%s\",\n"
         "  \"motion\": { \"ok\": %s, \"mag\": %.3f },\n"
         "  \"rs485\": { \"inited\": %s, \"written\": %d, \"rx_bytes\": %d, \"pass\": %s },\n"
         "  \"can\": { \"inited\": %s, \"started\": %s, \"state\": %d, \"pass\": %s },\n"
@@ -398,6 +476,8 @@ static void emit_summary_over_uart0(const selftest_report_t *r)
         "  \"ign\": { \"tested\": %s, \"pass\": %s }\n"
         "}\n",
         r->eg915_ok ? "true" : "false",
+        r->eg915_imei,
+        r->eg915_iccid,
         r->motion_ok ? "true" : "false", r->motion_mag,
         r->rs485_inited ? "true" : "false", r->rs485_written, r->rs485_rx_bytes, r->rs485_pass ? "true" : "false",
         r->can_inited ? "true" : "false", r->can_started ? "true" : "false", r->can_state, r->can_pass ? "true" : "false",
@@ -490,6 +570,16 @@ void Selftest_task(void *pv)
     selftest_report_t rep = (selftest_report_t){0};
     rep.eg915_ok = eg915_at_handshake_once(1000, 5);
     ESP_LOGI(TAG_ST, "EG915 AT: %s", rep.eg915_ok ? "PASS" : "FAIL");
+    
+    // Get IMEI and ICCID if AT handshake passed
+    if (rep.eg915_ok) {
+        eg915_get_imei(rep.eg915_imei, sizeof(rep.eg915_imei));
+        eg915_get_iccid(rep.eg915_iccid, sizeof(rep.eg915_iccid));
+    } else {
+        strcpy(rep.eg915_imei, "N/A");
+        strcpy(rep.eg915_iccid, "N/A");
+    }
+    
     selftest_motion(&rep);
     selftest_rs485(&rep);
     selftest_can(&rep);
