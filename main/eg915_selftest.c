@@ -18,6 +18,9 @@
 
 static const char *TAG_ST = "SELFTEST";
 
+// GUI 发送的握手 ACK，收到后输出一次自测结果
+#define GUI_SELFTEST_ACK "!GUI_SELFTEST_ACK"
+
 typedef struct {
     bool eg915_ok;
     // Motion
@@ -440,57 +443,116 @@ static void emit_summary_over_uart0(const selftest_report_t *r)
 #endif
 }
 
+static void wait_for_gui_ack_once(void)
+{
+    ESP_LOGI(TAG_ST, "Waiting for GUI ACK '%s'...", GUI_SELFTEST_ACK);
+    const int ack_buf_len = 64;
+    char ack_buf[ack_buf_len];
+    int ack_pos = 0;
+    memset(ack_buf, 0, sizeof(ack_buf));
+    while (1) {
+        uint8_t ch;
+        int n = uart_read_bytes(UART_NUM_0, &ch, 1, pdMS_TO_TICKS(100));
+        if (n == 1) {
+            if (ack_pos < ack_buf_len - 1) {
+                ack_buf[ack_pos++] = (char)ch;
+                ack_buf[ack_pos] = '\0';
+            } else {
+                memmove(ack_buf, ack_buf + 1, ack_buf_len - 2);
+                ack_buf[ack_buf_len - 2] = (char)ch;
+                ack_buf[ack_buf_len - 1] = '\0';
+            }
+            if (strstr(ack_buf, GUI_SELFTEST_ACK)) {
+                ESP_LOGI(TAG_ST, "GUI ACK received.");
+                break;
+            }
+        }
+    }
+}
+
 void Selftest_task(void *pv)
 {
     (void)pv;
-    ESP_LOGI(TAG_ST, "Self-test starting (EG915 + peripherals)...");
+    ESP_LOGI(TAG_ST, "Self-test task starting (RUN TESTS NOW -> WAIT ACK -> OUTPUT)...");
 
-    // 1) 确保GPIO初始化完成（app_main里会调用gpio_init）
-    // 2) 初始化 UART1（与MQTT模块一致的串口设置）
+    // 基础初始化
     mqtt_init();
-
-    // 循环执行完整自测，每 3 秒重跑一次
-    while (1) {
-        // 3) 仅在检测到模组关闭时才执行 PWRKEY 上电，避免偶数轮把模组关掉
-        int pwr_state = gpio_get_level(EG915U_POWER);
-        if (pwr_state == 0) {
-            ESP_LOGI(TAG_ST, "EG915U power state: OFF (IO48=0). Pulsing PWRKEY to turn ON...");
-            modem_power_cycle();
-            vTaskDelay(pdMS_TO_TICKS(2000));
-        } else {
-            ESP_LOGI(TAG_ST, "EG915U power state: ON (IO48=1). Skip PWRKEY pulse this cycle.");
-        }
-
-        // 4) 清理上电URC，避免干扰握手解析
-        ESP_LOGI(TAG_ST, "Draining boot URCs for 3s...");
-        drain_boot_urcs(3000);
-
-        // 5) 进行AT握手（最多5次，每次1秒超时）
-        selftest_report_t rep = (selftest_report_t){0};
-        rep.eg915_ok = eg915_at_handshake_once(1000, 5);
-        ESP_LOGI(TAG_ST, "EG915 AT: %s", rep.eg915_ok ? "PASS" : "FAIL");
-
-        // 6) 其他模块自测（尽量互不依赖）
-        selftest_motion(&rep);
-        selftest_rs485(&rep);
-        selftest_can(&rep);
-        selftest_battery(&rep);
-        selftest_gnss(&rep);
-        selftest_ign(&rep);  // IGN光耦测试
-
-    // 7) 汇总输出
-    // print_summary(&rep);          // JSON格式(用于程序解析)
-    // vTaskDelay(pdMS_TO_TICKS(100)); // 确保JSON输出完成
-        print_human_summary(&rep);    // 简洁日志格式(用于ESP_LOG查看)
-        vTaskDelay(pdMS_TO_TICKS(100)); // 确保简洁汇总输出完成
-        // print_com6_formatted_result(&rep);  // 格式化表格(用于COM6串口直接查看)
-        // vTaskDelay(pdMS_TO_TICKS(100)); // 确保表格输出完成
-    // 7.1) 通过 UART0 的 43/44 将 JSON 摘要发给工厂治具
-        emit_summary_over_uart0(&rep);
-
-        // 8) 3 秒后重新测试
-        vTaskDelay(pdMS_TO_TICKS(3000));
+    int pwr_state = gpio_get_level(EG915U_POWER);
+    if (pwr_state == 0) {
+        ESP_LOGI(TAG_ST, "Power OFF -> pulsing PWRKEY...");
+        modem_power_cycle();
+        vTaskDelay(pdMS_TO_TICKS(2000));
     }
+    ESP_LOGI(TAG_ST, "Draining boot URCs for 3s...");
+    drain_boot_urcs(3000);
+
+    // 立即执行各项测试（但先不通过 UART0 发回结果）
+    selftest_report_t rep = (selftest_report_t){0};
+    rep.eg915_ok = eg915_at_handshake_once(1000, 5);
+    ESP_LOGI(TAG_ST, "EG915 AT: %s", rep.eg915_ok ? "PASS" : "FAIL");
+    selftest_motion(&rep);
+    selftest_rs485(&rep);
+    selftest_can(&rep);
+    selftest_battery(&rep);
+    selftest_gnss(&rep);
+    selftest_ign(&rep);
+
+    // 等待 GUI ACK 后再输出（无限等待，严格满足“收到ACK才发”）
+    if (uart_driver_install(UART_NUM_0, 256, 0, 0, NULL, 0) == ESP_OK) {
+        uart_config_t cfg = {
+            .baud_rate = 115200,
+            .data_bits = UART_DATA_8_BITS,
+            .parity    = UART_PARITY_DISABLE,
+            .stop_bits = UART_STOP_BITS_1,
+            .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
+            .source_clk = UART_SCLK_DEFAULT,
+        };
+        uart_param_config(UART_NUM_0, &cfg);
+        uart_set_pin(UART_NUM_0, U0TXD_PIN, U0RXD_PIN, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+
+        // 在 UART0 (COM6) 等待 ACK 时，周期性打印调试信息
+        const int ack_buf_len = 64;
+        char ack_buf[ack_buf_len];
+        int ack_pos = 0;
+        memset(ack_buf, 0, sizeof(ack_buf));
+        int wait_ms = 0;
+    // 通过 UART0 (COM6) 主动发一行提示，便于串口工具/GUI识别
+    const char *wait_msg = "Waiting for ACK: !GUI_SELFTEST_ACK\r\n";
+    uart_write_bytes(UART_NUM_0, wait_msg, strlen(wait_msg));
+    ESP_LOGI(TAG_ST, "[COM6][WAIT] DUT自测已完成，等待GUI发送ACK指令: %s", GUI_SELFTEST_ACK);
+        while (1) {
+            uint8_t ch;
+            int n = uart_read_bytes(UART_NUM_0, &ch, 1, pdMS_TO_TICKS(100));
+            wait_ms += 100;
+            if (n == 1) {
+                if (ack_pos < ack_buf_len - 1) {
+                    ack_buf[ack_pos++] = (char)ch;
+                    ack_buf[ack_pos] = '\0';
+                } else {
+                    memmove(ack_buf, ack_buf + 1, ack_buf_len - 2);
+                    ack_buf[ack_buf_len - 2] = (char)ch;
+                    ack_buf[ack_buf_len - 1] = '\0';
+                }
+                if (strstr(ack_buf, GUI_SELFTEST_ACK)) {
+                    ESP_LOGI(TAG_ST, "[COM6][WAIT] 收到ACK，准备输出自测结果");
+                    break;
+                }
+            }
+            if (wait_ms % 1000 == 0) {
+                ESP_LOGI(TAG_ST, "[COM6][WAIT] DUT已完成自测，正在等待ACK... 已等待%d ms", wait_ms);
+            }
+        }
+        uart_driver_delete(UART_NUM_0);
+    } else {
+        ESP_LOGW(TAG_ST, "UART0 driver install failed; cannot wait for ACK. Emitting immediately.");
+    }
+
+    // 现在才通过 COM6 输出一次结果
+    print_human_summary(&rep);
+    vTaskDelay(pdMS_TO_TICKS(100));
+    emit_summary_over_uart0(&rep);
+    ESP_LOGI(TAG_ST, "Self-test summary emitted after ACK. Task exiting.");
+    vTaskDelete(NULL);
 }
 
 // start_eg915_at_selftest removed; task is created directly from app_main
