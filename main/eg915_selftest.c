@@ -44,6 +44,9 @@ typedef struct {
     // Battery
     bool battery_ok;
     float battery_v;
+    // IBL (IO2) ADC
+    uint32_t ibl_mv;
+    bool     ibl_ok;
     // IGN optocoupler
     bool ign_tested;
     bool ign_pass;
@@ -351,6 +354,14 @@ static void selftest_ign(selftest_report_t *r)
     ESP_LOGI(TAG_ST, "IGN optocoupler: %s", pass ? "PASS" : "FAIL");
 }
 
+static void selftest_ibl(selftest_report_t *r)
+{
+    // 读取 IO2 的 ADC 电压 (mV)
+    r->ibl_mv = read_io2_voltage_mv();
+    r->ibl_ok = (r->ibl_mv > 0);
+    ESP_LOGI(TAG_ST, "IBL (IO2) = %lu mV (ok=%d)", (unsigned long)r->ibl_mv, r->ibl_ok);
+}
+
 static void print_summary(const selftest_report_t *r)
 {
     ESP_LOGI(TAG_ST,
@@ -364,6 +375,7 @@ static void print_summary(const selftest_report_t *r)
     "  \"can\": { \"inited\": %s, \"started\": %s, \"state\": %d, \"pass\": %s },\n"
         "  \"gnss\": { \"uart_ok\": %s, \"bytes\": %d },\n"
         "  \"battery\": { \"ok\": %s, \"voltage\": %.2f },\n"
+        "  \"ibl_mv\": %lu,\n"
         "  \"ign\": { \"tested\": %s, \"pass\": %s }\n"
         "}\n",
         r->eg915_ok ? "true" : "false",
@@ -374,6 +386,7 @@ static void print_summary(const selftest_report_t *r)
     r->can_inited ? "true" : "false", r->can_started ? "true" : "false", r->can_state, r->can_pass ? "true" : "false",
         r->gnss_uart_ok ? "true" : "false", r->gnss_bytes,
         r->battery_ok ? "true" : "false", r->battery_v,
+        (unsigned long)r->ibl_mv,
         r->ign_tested ? "true" : "false", r->ign_pass ? "true" : "false"
     );
 }
@@ -431,6 +444,8 @@ static void print_com6_formatted_result(const selftest_report_t *r)
     
     ESP_LOGI(TAG_ST, "║ Battery Voltage    │ %-7s │ Voltage: %.2f V               ║", 
            r->battery_ok ? "PASS" : "FAIL", r->battery_v);
+            ESP_LOGI(TAG_ST, "║ IBL (IO2)          │ %-7s │ %4lu mV                        ║", 
+                r->ibl_ok ? "OK" : "N/A", (unsigned long)r->ibl_mv);
     
     ESP_LOGI(TAG_ST, "║ IGN Optocoupler    │ %-7s │ Signal transition detected     ║", 
            ign_ok ? "PASS" : "FAIL");
@@ -473,6 +488,7 @@ static void emit_summary_over_uart0(const selftest_report_t *r)
         "  \"can\": { \"inited\": %s, \"started\": %s, \"state\": %d, \"pass\": %s },\n"
         "  \"gnss\": { \"uart_ok\": %s, \"bytes\": %d },\n"
         "  \"battery\": { \"ok\": %s, \"voltage\": %.2f },\n"
+        "  \"ibl_mv\": %lu,\n"
         "  \"ign\": { \"tested\": %s, \"pass\": %s }\n"
         "}\n",
         r->eg915_ok ? "true" : "false",
@@ -483,6 +499,7 @@ static void emit_summary_over_uart0(const selftest_report_t *r)
         r->can_inited ? "true" : "false", r->can_started ? "true" : "false", r->can_state, r->can_pass ? "true" : "false",
         r->gnss_uart_ok ? "true" : "false", r->gnss_bytes,
         r->battery_ok ? "true" : "false", r->battery_v,
+        (unsigned long)r->ibl_mv,
         r->ign_tested ? "true" : "false", r->ign_pass ? "true" : "false"
     );
     if (n <= 0) return;
@@ -584,6 +601,8 @@ void Selftest_task(void *pv)
     selftest_rs485(&rep);
     selftest_can(&rep);
     selftest_battery(&rep);
+    // 采集 IBL (IO2) 电压
+    selftest_ibl(&rep);
     selftest_gnss(&rep);
     selftest_ign(&rep);
 

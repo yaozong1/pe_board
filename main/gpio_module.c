@@ -9,8 +9,10 @@ static const char *TAG = "GPIO";
 
 void gpio_init(void)
 {
-    // GPIO 初始�?
-    gpio_set_direction(LED_PIN_1, GPIO_MODE_OUTPUT);
+    // GPIO 初始化
+    // IO2 在此设计上用于 IBL (ADC) 采样，不应被当作 LED 驱动。
+    // 仅将其内部上/下拉关闭以避免影响 ADC 读数（不要改变引脚复用为输出）。
+    gpio_set_pull_mode(IBL_PIN, GPIO_FLOATING);
     gpio_set_direction(LED_PIN_3, GPIO_MODE_OUTPUT);
     gpio_set_direction(BUTTON_PIN, GPIO_MODE_INPUT);
     gpio_set_pull_mode(BUTTON_PIN, GPIO_PULLUP_ONLY);
@@ -64,6 +66,11 @@ void power_control_init(void)
 
 void led_set(int led_pin, bool state)
 {
+    // 如果传入的 LED 引脚是 IBL_PIN（IO2，作为 ADC 使用），则跳过驱动以避免干扰外设。
+    if (led_pin == IBL_PIN) {
+        ESP_LOGD(TAG, "led_set: skipping drive for IBL_PIN (IO%d)", IBL_PIN);
+        return;
+    }
     gpio_set_level(led_pin, state ? 1 : 0);
 }
 
@@ -74,12 +81,13 @@ bool button_is_pressed(void)
 
 void led1_on(void)
 {
-    led_set(LED_PIN_1, true);
+    // led1 对应物理引脚现在语义为 IBL；保持向后兼容但传入 IBL_PIN
+    led_set(IBL_PIN, true);
 }
 
 void led1_off(void)
 {
-    led_set(LED_PIN_1, false);
+    led_set(IBL_PIN, false);
 }
 
 void led3_on(void)

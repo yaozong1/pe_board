@@ -13,8 +13,15 @@
 #endif
 
 #ifndef LED_PIN_1
-// 注意：GPIO1 被用于 ADC1_CHANNEL_0（电池采样），避免冲突，这里改用 GPIO2 作为 LED1
+// 注意：GPIO1 被用于 ADC1_CHANNEL_0（电池采样），避免冲突。
+// 这里将 IO2 (GPIO2) 保留给 IBL (internal battery/load) 的 ADC 读取用途，
+// 名称中仍保留 `LED_PIN_1` 以兼容现有代码，但语义上它是 IBL 输入引脚，
+// 如果用于 ADC 请勿在运行时驱动该引脚（应配置为浮空输入）。
 #define LED_PIN_1 2
+#ifndef IBL_PIN
+// 别名：更清晰地表明 IO2 在设计中用于 IBL 测量
+#define IBL_PIN LED_PIN_1
+#endif
 #endif
 #ifndef LED_PIN_3
 #define LED_PIN_3 3

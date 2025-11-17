@@ -1690,8 +1690,11 @@ static void mqtt_poll_urc(void)
 
 void gpio_init(void)
 {
-// GPIO 初始化
-    gpio_set_direction(LED_PIN_1, GPIO_MODE_OUTPUT);
+    // GPIO 初始化
+    // IO2 在此设计上作为 IBL (ADC) 使用；确保不被驱动，设置为浮空以利于 ADC 采样
+    gpio_reset_pin(IBL_PIN);
+    gpio_set_direction(IBL_PIN, GPIO_MODE_INPUT);
+    gpio_set_pull_mode(IBL_PIN, GPIO_FLOATING);
     gpio_set_direction(LED_PIN_3, GPIO_MODE_OUTPUT);
     gpio_set_direction(BUTTON_PIN, GPIO_MODE_INPUT);
     gpio_set_pull_mode(BUTTON_PIN, GPIO_PULLUP_ONLY);

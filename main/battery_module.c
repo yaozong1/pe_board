@@ -15,6 +15,8 @@ void battery_init(void)
     // 初始化 ADC
     adc1_config_width(ADC_WIDTH_BIT_12);
     adc1_config_channel_atten(ADC1_CHANNEL, ADC_ATTEN_DB_11);
+    // 同时配置 IO2 对应的 ADC 通道以便 IBL 采样
+    adc1_config_channel_atten(ADC1_CHANNEL_1, ADC_ATTEN_DB_11);
     adc_chars = calloc(1, sizeof(esp_adc_cal_characteristics_t));
     esp_adc_cal_characterize(ADC_UNIT_1, ADC_ATTEN_DB_11, ADC_WIDTH_BIT_12, 1100, adc_chars);
     
@@ -36,6 +38,24 @@ uint32_t read_adc_voltage_mv(void)
     uint32_t adc_reading = read_adc_raw();
     uint32_t voltage = esp_adc_cal_raw_to_voltage(adc_reading, adc_chars);
     return voltage;
+}
+
+// ----- IO2 (IBL) helpers -----
+uint32_t read_io2_raw(void)
+{
+    uint32_t adc_reading = 0;
+    for (int i = 0; i < NO_OF_SAMPLES; i++) {
+        adc_reading += adc1_get_raw(ADC1_CHANNEL_1);
+    }
+    adc_reading /= NO_OF_SAMPLES;
+    return adc_reading;
+}
+
+uint32_t read_io2_voltage_mv(void)
+{
+    uint32_t raw = read_io2_raw();
+    uint32_t mv = esp_adc_cal_raw_to_voltage(raw, adc_chars);
+    return mv;
 }
 
 float read_battery_voltage(void)
