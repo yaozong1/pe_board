@@ -93,6 +93,11 @@
 #define ADC1_CHANNEL ADC1_CHANNEL_0  // IO1 对应 ADC1_CHANNEL_0
 #define NO_OF_SAMPLES 64  // 采样数
 
+// 电池电压分压比 (硬件无分压器,直接测量)
+#ifndef VBAT_DIVIDER_RATIO
+#define VBAT_DIVIDER_RATIO 1.0f  // 无分压电路,直接测量实际电压
+#endif
+
 // 功能开关
 #ifndef ENABLE_MQTT
 #define ENABLE_MQTT 1
