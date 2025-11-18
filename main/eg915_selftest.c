@@ -78,7 +78,7 @@ static bool eg915_get_imei(char *imei_buf, size_t buf_size)
     send_at_command("AT+GSN");
     
     char resp[128];
-    int len = uart_read_response(resp, sizeof(resp), 2000);
+    int len = uart_read_response(resp, sizeof(resp), 1000);
     if (len > 0) {
         // Find IMEI (usually 15 digits)
         char *p = resp;
@@ -114,7 +114,7 @@ static bool eg915_get_iccid(char *iccid_buf, size_t buf_size)
     send_at_command("AT+CCID");
     
     char resp[128];
-    int len = uart_read_response(resp, sizeof(resp), 2000);
+    int len = uart_read_response(resp, sizeof(resp), 1000);
     if (len > 0) {
         // Find ICCID (usually 19-20 digits)
         // Format might be +CCID: 89860123456789012345
@@ -140,15 +140,21 @@ static bool eg915_get_iccid(char *iccid_buf, size_t buf_size)
 
 static void drain_boot_urcs(uint32_t ms)
 {
-    uint32_t t0 = xTaskGetTickCount();
+    // 智能URC drain: 最多等ms毫秒，但连续200ms无数据就提前退出
+    TickType_t t0 = xTaskGetTickCount();
+    TickType_t last_data = t0;
     char buf[256];
     while ((xTaskGetTickCount() - t0) < pdMS_TO_TICKS(ms)) {
         int n = uart_read_bytes(UART_EG915U_NUM, (uint8_t*)buf, sizeof(buf) - 1, pdMS_TO_TICKS(50));
         if (n > 0) {
+            last_data = xTaskGetTickCount();
             buf[n] = '\0';
             ESP_LOGI(TAG_ST, "URC: %s", buf);
-        } else {
-            vTaskDelay(pdMS_TO_TICKS(50));
+        }
+        // 连续200ms无数据，认为URC已清空
+        if ((xTaskGetTickCount() - last_data) > pdMS_TO_TICKS(200)) {
+            ESP_LOGI(TAG_ST, "URC drain complete (no data for 200ms)");
+            break;
         }
     }
 }
@@ -200,7 +206,7 @@ static void selftest_rs485(selftest_report_t *r)
     uint8_t buf[64];
     int total = 0;
     TickType_t t0 = xTaskGetTickCount();
-    while ((xTaskGetTickCount() - t0) < pdMS_TO_TICKS(2000)) {
+    while ((xTaskGetTickCount() - t0) < pdMS_TO_TICKS(800)) {
         int n = rs485_read(buf + total, sizeof(buf) - total, pdMS_TO_TICKS(50));
         if (n > 0) {
             total += n;
@@ -334,7 +340,7 @@ static void selftest_gnss(selftest_report_t *r)
     uint8_t buf[128];
     int total = 0;
     TickType_t t0 = xTaskGetTickCount();
-    while ((xTaskGetTickCount() - t0) < pdMS_TO_TICKS(1500)) {
+    while ((xTaskGetTickCount() - t0) < pdMS_TO_TICKS(800)) {
         int n = uart_read_bytes(GNSS_UART_NUM, buf, sizeof(buf), pdMS_TO_TICKS(100));
         if (n > 0) { total += n; if (total >= 32) break; }
     }
@@ -346,10 +352,10 @@ static void selftest_gnss(selftest_report_t *r)
 static void selftest_ign(selftest_report_t *r)
 {
     r->ign_tested = true;
-    // 测试IGN光耦：等待5秒检测电平变化（高->低->高）
-    // 治具的IGN_TEST_PIN每100ms切换，所以5秒内应该能检测到完整的转换
-    ESP_LOGI(TAG_ST, "Testing IGN optocoupler (timeout=5000ms)...");
-    bool pass = ign_test_detect_transition(5000);
+    // 测试IGN光耦：等待1秒检测电平变化（高->低->高）
+    // 治具的IGN_TEST_PIN每100ms切换，1秒内足够检测到完整的转换
+    ESP_LOGI(TAG_ST, "Testing IGN optocoupler (timeout=1000ms)...");
+    bool pass = ign_test_detect_transition(1000);
     r->ign_pass = pass;
     ESP_LOGI(TAG_ST, "IGN optocoupler: %s", pass ? "PASS" : "FAIL");
 }
@@ -585,7 +591,7 @@ void Selftest_task(void *pv)
 
     // 立即执行各项测试（但先不通过 UART0 发回结果）
     selftest_report_t rep = (selftest_report_t){0};
-    rep.eg915_ok = eg915_at_handshake_once(1000, 5);
+    rep.eg915_ok = eg915_at_handshake_once(500, 3);
     ESP_LOGI(TAG_ST, "EG915 AT: %s", rep.eg915_ok ? "PASS" : "FAIL");
     
     // Get IMEI and ICCID if AT handshake passed
