@@ -323,8 +323,9 @@ static void selftest_battery(selftest_report_t *r)
     if (!bat_inited) { battery_init(); bat_inited = true; }
     float v = read_battery_voltage();
     r->battery_v = v;
-    r->battery_ok = (v > 0.1f);
-    ESP_LOGI(TAG_ST, "Battery voltage=%.2fV (ok=%d)", v, r->battery_ok);
+    // EBL判定标准: 0.49V ±10% (0.441V - 0.539V)
+    r->battery_ok = (v >= 0.441f && v <= 0.539f);
+    ESP_LOGI(TAG_ST, "Battery voltage=%.2fV (ok=%d, expect 0.49V±10%%)", v, r->battery_ok);
 }
 
 static void selftest_gnss(selftest_report_t *r)
