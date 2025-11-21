@@ -206,7 +206,10 @@ static void selftest_rs485(selftest_report_t *r)
     uint8_t buf[64];
     int total = 0;
     TickType_t t0 = xTaskGetTickCount();
-    while ((xTaskGetTickCount() - t0) < pdMS_TO_TICKS(800)) {
+    // 4秒总超时保护，确保测试必定在4秒内完成
+    const uint32_t rs485_total_timeout_ms = 4000;
+    ESP_LOGI(TAG_ST, "RS485: Waiting for response (timeout=%lums)...", (unsigned long)rs485_total_timeout_ms);
+    while ((xTaskGetTickCount() - t0) < pdMS_TO_TICKS(rs485_total_timeout_ms)) {
         int n = rs485_read(buf + total, sizeof(buf) - total, pdMS_TO_TICKS(50));
         if (n > 0) {
             total += n;
@@ -222,11 +225,28 @@ static void selftest_rs485(selftest_report_t *r)
             if (total >= (int)sizeof(buf)) break;
         }
     }
+    
+    uint32_t elapsed = (xTaskGetTickCount() - t0) * portTICK_PERIOD_MS;
+    if (!r->rs485_pass) {
+        ESP_LOGW(TAG_ST, "RS485 test FAILED: timeout after %lums (no valid response)", (unsigned long)elapsed);
+    } else {
+        ESP_LOGI(TAG_ST, "RS485 test PASSED in %lums", (unsigned long)elapsed);
+    }
+    
+    // 清理RS485（带超时保护，确保不阻塞）
+    ESP_LOGI(TAG_ST, "RS485: Starting cleanup (deinit)...");
     rs485_deinit();
+    ESP_LOGI(TAG_ST, "RS485: Cleanup completed");
 }
 
 static void selftest_can(selftest_report_t *r)
 {
+    // 4秒总超时保护：确保整个CAN测试（包括清理）在4秒内完成
+    TickType_t can_test_start = xTaskGetTickCount();
+    const uint32_t can_total_timeout_ms = 4000;
+    uint32_t elapsed_ms = 0;  // 声明时间变量，用于记录各阶段耗时
+    ESP_LOGI(TAG_ST, "CAN: Test started (total timeout=%lums)", (unsigned long)can_total_timeout_ms);
+    
     // 检测CAN_EN_PIN (GPIO41) 的电平状态
     int can_en_level = gpio_get_level(CAN_EN_PIN);
     ESP_LOGI(TAG_ST, "CAN_EN_PIN (IO%d) level before init: %d (should be 0 for normal, 1 for shutdown)", CAN_EN_PIN, can_en_level);
@@ -244,7 +264,7 @@ static void selftest_can(selftest_report_t *r)
         // 再次检测GPIO41,看是否被错误拉高
         can_en_level = gpio_get_level(CAN_EN_PIN);
         ESP_LOGE(TAG_ST, "CAN_EN_PIN (IO%d) level after init failure: %d", CAN_EN_PIN, can_en_level);
-        return;
+        goto can_cleanup;  // 跳转到清理代码，确保不阻塞
     }
     
     // 初始化后再次检测
@@ -257,6 +277,7 @@ static void selftest_can(selftest_report_t *r)
         // 启动失败后检测GPIO41
         can_en_level = gpio_get_level(CAN_EN_PIN);
         ESP_LOGE(TAG_ST, "CAN_EN_PIN (IO%d) level after start failure: %d", CAN_EN_PIN, can_en_level);
+        goto can_cleanup;  // 跳转到清理代码
     }
     
     can_state_t st = can_get_state();
@@ -269,6 +290,11 @@ static void selftest_can(selftest_report_t *r)
         int flushed = 0;
         while (can_receive_message(&dummy, 10)) {
             flushed++;
+            // 防止清空队列时超时
+            if ((xTaskGetTickCount() - can_test_start) > pdMS_TO_TICKS(can_total_timeout_ms)) {
+                ESP_LOGW(TAG_ST, "CAN: Timeout during queue flush, aborting");
+                goto can_cleanup;
+            }
         }
         if (flushed > 0) {
             ESP_LOGW(TAG_ST, "CAN: Flushed %d old messages from RX queue", flushed);
@@ -285,10 +311,28 @@ static void selftest_can(selftest_report_t *r)
         bool sent = can_send_message(&msg, 100);
         ESP_LOGI(TAG_ST, "CAN send result: %s", sent ? "OK" : "FAIL");
 
+        // 检查是否已超时
+        if ((xTaskGetTickCount() - can_test_start) > pdMS_TO_TICKS(can_total_timeout_ms)) {
+            ESP_LOGW(TAG_ST, "CAN: Timeout after send, skipping receive");
+            goto can_cleanup;
+        }
+
         TickType_t t0 = xTaskGetTickCount();
         can_message_t rx;
         int rx_count = 0;
-        while ((xTaskGetTickCount() - t0) < pdMS_TO_TICKS(2000)) {
+        // 接收超时：取min(剩余时间, 3500ms)
+        uint32_t elapsed_ms = (xTaskGetTickCount() - can_test_start) * portTICK_PERIOD_MS;
+        uint32_t remaining_ms = (elapsed_ms < can_total_timeout_ms) ? (can_total_timeout_ms - elapsed_ms) : 100;
+        if (remaining_ms > 3500) remaining_ms = 3500;  // 最多等3.5秒接收
+        
+        ESP_LOGI(TAG_ST, "CAN: Waiting for response (timeout=%lums)...", (unsigned long)remaining_ms);
+        while ((xTaskGetTickCount() - t0) < pdMS_TO_TICKS(remaining_ms)) {
+            // 双重超时检查：局部超时 + 全局超时
+            if ((xTaskGetTickCount() - can_test_start) > pdMS_TO_TICKS(can_total_timeout_ms)) {
+                ESP_LOGW(TAG_ST, "CAN: Global timeout reached, aborting receive");
+                break;
+            }
+            
             if (can_receive_message(&rx, 50)) {
                 rx_count++;
                 ESP_LOGI(TAG_ST, "CAN RX#%d: ID=0x%03lx, len=%d, data=[%02X %02X %02X %02X %02X %02X %02X %02X]",
@@ -308,13 +352,20 @@ static void selftest_can(selftest_report_t *r)
         }
         
         if (!r->can_pass) {
-            ESP_LOGW(TAG_ST, "CAN: No matching loopback received (rx_count=%d)", rx_count);
+            ESP_LOGW(TAG_ST, "CAN test FAILED: No matching loopback received (rx_count=%d)", rx_count);
         }
     }
 
-    // 结束后清理
+can_cleanup:
+    // 强制清理，确保在超时保护下完成（带额外日志）
+    elapsed_ms = (xTaskGetTickCount() - can_test_start) * portTICK_PERIOD_MS;
+    ESP_LOGI(TAG_ST, "CAN: Starting cleanup at %lums (pass=%d)...", (unsigned long)elapsed_ms, r->can_pass);
+    
     can_module_stop();
     can_module_deinit();
+    
+    elapsed_ms = (xTaskGetTickCount() - can_test_start) * portTICK_PERIOD_MS;
+    ESP_LOGI(TAG_ST, "CAN: Test completed in %lums (pass=%d)", (unsigned long)elapsed_ms, r->can_pass);
 }
 
 static void selftest_battery(selftest_report_t *r)
