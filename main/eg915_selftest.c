@@ -416,8 +416,15 @@ static void selftest_ibl(selftest_report_t *r)
 {
     // 读取 IO2 的 ADC 电压 (mV)
     r->ibl_mv = read_io2_voltage_mv();
-    r->ibl_ok = (r->ibl_mv > 0);
-    ESP_LOGI(TAG_ST, "IBL (IO2) = %lu mV (ok=%d)", (unsigned long)r->ibl_mv, r->ibl_ok);
+    
+    // IBL 电压应在 2.2V - 2.5V 范围内 (2200mV - 2500mV)
+    uint32_t lower = 2200;  // 2.2V
+    uint32_t upper = 2500;  // 2.5V
+    r->ibl_ok = (r->ibl_mv >= lower && r->ibl_mv <= upper);
+    
+    ESP_LOGI(TAG_ST, "IBL (IO2) = %lu mV (ok=%d, range=%lu-%lu)", 
+             (unsigned long)r->ibl_mv, r->ibl_ok, 
+             (unsigned long)lower, (unsigned long)upper);
 }
 
 static void print_summary(const selftest_report_t *r)
@@ -454,7 +461,7 @@ static void print_human_summary(const selftest_report_t *r)
     bool rs485_ok = r->rs485_pass; // 严格要求收到 01..08
     bool can_ok   = r->can_pass;   // 严格要求收到 01..08
     bool ign_ok   = r->ign_pass;   // IGN光耦测试通过
-    bool overall  = r->eg915_ok && r->motion_ok && rs485_ok && can_ok && r->gnss_uart_ok && r->battery_ok && ign_ok;
+    bool overall  = r->eg915_ok && r->motion_ok && rs485_ok && can_ok && r->gnss_uart_ok && r->battery_ok && r->ibl_ok && ign_ok;
 
     ESP_LOGI(TAG_ST, "================= SELFTEST RESULT =================");
     ESP_LOGI(TAG_ST, "EG915       : %s", r->eg915_ok     ? "PASS" : "FAIL");
@@ -502,8 +509,9 @@ static void print_com6_formatted_result(const selftest_report_t *r)
     
     ESP_LOGI(TAG_ST, "║ Battery Voltage    │ %-7s │ Voltage: %.2f V               ║", 
            r->battery_ok ? "PASS" : "FAIL", r->battery_v);
-            ESP_LOGI(TAG_ST, "║ IBL (IO2)          │ %-7s │ %4lu mV                        ║", 
-                r->ibl_ok ? "OK" : "N/A", (unsigned long)r->ibl_mv);
+           
+    ESP_LOGI(TAG_ST, "║ IBL (IO2)          │ %-7s │ %4lu mV (2200-2500 range)     ║", 
+           r->ibl_ok ? "PASS" : "FAIL", (unsigned long)r->ibl_mv);
     
     ESP_LOGI(TAG_ST, "║ IGN Optocoupler    │ %-7s │ Signal transition detected     ║", 
            ign_ok ? "PASS" : "FAIL");
