@@ -255,30 +255,44 @@ static void selftest_can(selftest_report_t *r)
         ESP_LOGE(TAG_ST, "ERROR: CAN_EN_PIN should be LOW(0) but is HIGH(1) - transceiver is in shutdown mode!");
     }
     
-    r->can_inited = can_module_init(CAN_BITRATE_250K);
-    r->can_started = false;
+    // 先尝试强制复位CAN控制器，清除可能的Bus-Off状态
+    ESP_LOGI(TAG_ST, "CAN: Attempting force reset to clear any error states...");
+    bool reset_ok = can_force_reset();
+    if (reset_ok) {
+        ESP_LOGI(TAG_ST, "CAN: Force reset successful");
+        // 强制复位成功，CAN已经初始化和启动
+        r->can_inited = true;
+        r->can_started = true;
+    } else {
+        ESP_LOGW(TAG_ST, "CAN: Force reset failed, trying normal init...");
+        // 强制复位失败，尝试正常初始化
+        r->can_inited = can_module_init(CAN_BITRATE_250K);
+        r->can_started = false;
+        if (!r->can_inited) {
+            ESP_LOGW(TAG_ST, "CAN init failed");
+            // 再次检测GPIO41,看是否被错误拉高
+            can_en_level = gpio_get_level(CAN_EN_PIN);
+            ESP_LOGE(TAG_ST, "CAN_EN_PIN (IO%d) level after init failure: %d", CAN_EN_PIN, can_en_level);
+            goto can_cleanup;  // 跳转到清理代码，确保不阻塞
+        }
+        
+        // 初始化后再次检测
+        can_en_level = gpio_get_level(CAN_EN_PIN);
+        ESP_LOGI(TAG_ST, "CAN_EN_PIN (IO%d) level after init: %d", CAN_EN_PIN, can_en_level);
+        
+        r->can_started = can_module_start();
+        if (!r->can_started) {
+            ESP_LOGW(TAG_ST, "CAN start failed");
+            // 启动失败后检测GPIO41
+            can_en_level = gpio_get_level(CAN_EN_PIN);
+            ESP_LOGE(TAG_ST, "CAN_EN_PIN (IO%d) level after start failure: %d", CAN_EN_PIN, can_en_level);
+            goto can_cleanup;  // 跳转到清理代码
+        }
+    }
+    
+    // 初始化状态变量
     r->can_state = -1;
     r->can_pass = false;
-    if (!r->can_inited) {
-        ESP_LOGW(TAG_ST, "CAN init failed");
-        // 再次检测GPIO41,看是否被错误拉高
-        can_en_level = gpio_get_level(CAN_EN_PIN);
-        ESP_LOGE(TAG_ST, "CAN_EN_PIN (IO%d) level after init failure: %d", CAN_EN_PIN, can_en_level);
-        goto can_cleanup;  // 跳转到清理代码，确保不阻塞
-    }
-    
-    // 初始化后再次检测
-    can_en_level = gpio_get_level(CAN_EN_PIN);
-    ESP_LOGI(TAG_ST, "CAN_EN_PIN (IO%d) level after init: %d", CAN_EN_PIN, can_en_level);
-    
-    r->can_started = can_module_start();
-    if (!r->can_started) {
-        ESP_LOGW(TAG_ST, "CAN start failed");
-        // 启动失败后检测GPIO41
-        can_en_level = gpio_get_level(CAN_EN_PIN);
-        ESP_LOGE(TAG_ST, "CAN_EN_PIN (IO%d) level after start failure: %d", CAN_EN_PIN, can_en_level);
-        goto can_cleanup;  // 跳转到清理代码
-    }
     
     can_state_t st = can_get_state();
     r->can_state = (int)st;

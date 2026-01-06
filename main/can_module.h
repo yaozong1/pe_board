@@ -74,6 +74,7 @@ can_state_t can_get_state(void);
 bool can_get_stats(can_stats_t* stats);
 void can_reset_stats(void);
 bool can_is_bus_healthy(void);
+bool can_force_reset(void);  // 强制复位 CAN 控制器状态
 
 // 任务和处理函数
 void can_task(void* pvParameters);

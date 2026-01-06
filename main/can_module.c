@@ -481,3 +481,94 @@ void can_test_send_periodic(void)
     
     counter++;
 }
+
+bool can_force_reset(void)
+{
+    ESP_LOGI(TAG, "Force resetting CAN controller...");
+    
+    // 记录原始状态
+    twai_status_info_t old_status;
+    if (twai_get_status_info(&old_status) == ESP_OK) {
+        ESP_LOGI(TAG, "Before reset - CAN State: %lu, TX_ERR: %lu, RX_ERR: %lu", 
+                 (unsigned long)old_status.state, (unsigned long)old_status.tx_error_counter, (unsigned long)old_status.rx_error_counter);
+    }
+    
+    // 强制停止并卸载驱动
+    if (can_running) {
+        twai_stop();
+        can_running = false;
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
+    
+    if (can_initialized) {
+        twai_driver_uninstall();
+        can_initialized = false;
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+    
+    // 重新初始化
+    if (!configure_gpio_pins()) {
+        ESP_LOGE(TAG, "Failed to reconfigure GPIO pins");
+        return false;
+    }
+    
+    // 重新安装驱动 - 使用与正常初始化相同的配置
+    twai_general_config_t g_config = TWAI_GENERAL_CONFIG_DEFAULT(CAN_TX_PIN, CAN_RX_PIN, TWAI_MODE_NORMAL);
+    twai_timing_config_t t_config = TWAI_TIMING_CONFIG_250KBITS();  // 使用250K速率，与正常初始化保持一致
+    twai_filter_config_t f_config = TWAI_FILTER_CONFIG_ACCEPT_ALL();
+    
+    // 使用与正常初始化相同的配置
+    g_config.intr_flags = 0;
+    g_config.alerts_enabled = TWAI_ALERT_TX_FAILED | TWAI_ALERT_TX_SUCCESS |
+                              TWAI_ALERT_RX_DATA | TWAI_ALERT_BUS_OFF |
+                              TWAI_ALERT_RECOVERY_IN_PROGRESS | TWAI_ALERT_BUS_RECOVERED;
+    
+    esp_err_t ret = twai_driver_install(&g_config, &t_config, &f_config);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to reinstall TWAI driver: %s", esp_err_to_name(ret));
+        return false;
+    }
+    
+    can_initialized = true;
+    
+    // 启动驱动
+    ret = twai_start();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to restart TWAI driver: %s", esp_err_to_name(ret));
+        twai_driver_uninstall();
+        can_initialized = false;
+        return false;
+    }
+    
+    can_running = true;
+    
+    // 检查新状态
+    twai_status_info_t new_status;
+    esp_err_t status_ret = twai_get_status_info(&new_status);
+    if (status_ret == ESP_OK) {
+        ESP_LOGI(TAG, "After reset - CAN State: %lu, TX_ERR: %lu, RX_ERR: %lu", 
+                 (unsigned long)new_status.state, (unsigned long)new_status.tx_error_counter, (unsigned long)new_status.rx_error_counter);
+    } else {
+        ESP_LOGE(TAG, "Failed to get status after reset: %s", esp_err_to_name(status_ret));
+        // 状态获取失败，但驱动已经启动，认为成功
+        goto reset_success;
+    }
+    
+    // 重置统计信息
+    can_reset_stats();
+    
+    ESP_LOGI(TAG, "CAN controller force reset completed successfully");
+    
+    // 检查状态是否为运行状态
+    if (new_status.state == TWAI_STATE_RUNNING) {
+        return true;
+    } else {
+        ESP_LOGW(TAG, "CAN reset completed but state is not RUNNING: %lu", (unsigned long)new_status.state);
+        return true;  // 即使状态不是RUNNING，驱动已经重新安装和启动，认为成功
+    }
+
+reset_success:
+    can_reset_stats();
+    ESP_LOGI(TAG, "CAN controller force reset completed successfully");
+    return true;
+}

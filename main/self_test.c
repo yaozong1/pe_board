@@ -35,18 +35,35 @@ static void log_summary(const selftest_result_t *r)
 
 static bool test_can(void)
 {
-    ESP_LOGI(TAG, "[CAN] init/start @250K...");
+    ESP_LOGI(TAG, "[CAN] Starting test with force reset...");
     bool ok = false;
-    if (can_module_init(CAN_BITRATE_250K)) {
-        if (can_module_start()) {
-            vTaskDelay(pdMS_TO_TICKS(100));
-            // 简单健康检查：不处于BUS OFF即认为通过
-            ok = can_is_bus_healthy();
+    
+    // 先尝试强制复位CAN控制器
+    if (can_force_reset()) {
+        ESP_LOGI(TAG, "[CAN] Force reset successful");
+        vTaskDelay(pdMS_TO_TICKS(100));
+        // 检查是否健康
+        ok = can_is_bus_healthy();
+        
+        // 试发一帧，便于观察告警
+        uint8_t payload[8] = {0x53, 0x54, 0x5F, 0x43, 0x41, 0x4E, 0x00, 0x01}; // "ST_CAN\0\x01"
+        if (!can_send_data(0x321, payload, 8, 100)) {
+            ESP_LOGW(TAG, "[CAN] transmit returned error (bus may be idle/no ACK)");
+        }
+    } else {
+        ESP_LOGW(TAG, "[CAN] Force reset failed, trying normal init...");
+        // 强制复位失败，尝试正常初始化
+        if (can_module_init(CAN_BITRATE_250K)) {
+            if (can_module_start()) {
+                vTaskDelay(pdMS_TO_TICKS(100));
+                // 简单健康检查：不处于BUS OFF即认为通过
+                ok = can_is_bus_healthy();
 
-            // 试发一帧，便于观察告警
-            uint8_t payload[8] = {0x53, 0x54, 0x5F, 0x43, 0x41, 0x4E, 0x00, 0x01}; // "ST_CAN\0\x01"
-            if (!can_send_data(0x321, payload, 8, 100)) {
-                ESP_LOGW(TAG, "[CAN] transmit returned error (bus may be idle/no ACK)");
+                // 试发一帧，便于观察告警
+                uint8_t payload[8] = {0x53, 0x54, 0x5F, 0x43, 0x41, 0x4E, 0x00, 0x01}; // "ST_CAN\0\x01"
+                if (!can_send_data(0x321, payload, 8, 100)) {
+                    ESP_LOGW(TAG, "[CAN] transmit returned error (bus may be idle/no ACK)");
+                }
             }
         }
     }

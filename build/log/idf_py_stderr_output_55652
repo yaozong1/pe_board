@@ -1,0 +1,11 @@
+CMake Warning at C:/Users/h1576/esp/esp-idf/tools/cmake/git_submodules.cmake:52 (message):
+  Git submodule components/mbedtls/mbedtls is out of date.  Run 'git
+  submodule update --init --recursive' to fix.
+Call Stack (most recent call first):
+  C:/Users/h1576/esp/esp-idf/tools/cmake/build.cmake:77 (git_submodule_check)
+  C:/Users/h1576/esp/esp-idf/tools/cmake/build.cmake:219 (__build_get_idf_git_revision)
+  C:/Users/h1576/esp/esp-idf/tools/cmake/idf.cmake:53 (__build_init)
+  C:/Users/h1576/esp/esp-idf/tools/cmake/project.cmake:12 (include)
+  CMakeLists.txt:5 (include)
+
+
