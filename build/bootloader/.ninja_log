@@ -96,7 +96,7 @@
 9854	10162	7893934761980267	esp-idf/esp_rom/libesp_rom.a	23ef9186fe399763
 10162	10477	7893934764977486	esp-idf/esp_common/libesp_common.a	ac7eaa13112a9730
 10479	10764	7893934768048988	esp-idf/esp_hw_support/libesp_hw_support.a	9e37b20aa38e7b52
-14174	14803	7893934808515732	C:/Users/h1576/Desktop/Roam/pe_code/pe_board/build/bootloader/.bin_timestamp	78b1962b2e62eae8
+13	2133	7893945040088051	C:/Users/h1576/Desktop/Roam/pe_code/pe_board/build/bootloader/.bin_timestamp	3a16d6da7e49d261
 11369	11660	7893934776948557	esp-idf/bootloader_support/libbootloader_support.a	b46a0e67f31bdd62
 11663	11966	7893934780017242	esp-idf/esp_app_format/libesp_app_format.a	e94da372ad9ecad8
 11967	12326	7893934783324983	esp-idf/hal/libhal.a	ad8c6828f8774faf
@@ -105,12 +105,10 @@
 12898	13204	7893934792410312	esp-idf/xtensa/libxtensa.a	64d82752dfb418c3
 13205	13519	7893934795306216	esp-idf/main/libmain.a	ab7ad57e6540ec2b
 13520	14173	7893934800138288	bootloader.elf	93b64471eec89d5d
-14174	14803	7893934808515732	.bin_timestamp	78b1962b2e62eae8
-7	205	0	esp-idf/esptool_py/CMakeFiles/bootloader_check_size	2360b6896e891b2c
-7	205	0	C:/Users/h1576/Desktop/Roam/pe_code/pe_board/build/bootloader/esp-idf/esptool_py/CMakeFiles/bootloader_check_size	2360b6896e891b2c
 13	2133	7893945040088051	.bin_timestamp	3a16d6da7e49d261
-13	2133	7893945040088051	C:/Users/h1576/Desktop/Roam/pe_code/pe_board/build/bootloader/.bin_timestamp	3a16d6da7e49d261
-2135	2571	0	esp-idf/esptool_py/CMakeFiles/bootloader_check_size	c1540b00eb86926d
-2135	2571	0	C:/Users/h1576/Desktop/Roam/pe_code/pe_board/build/bootloader/esp-idf/esptool_py/CMakeFiles/bootloader_check_size	c1540b00eb86926d
 9	241	0	esp-idf/esptool_py/CMakeFiles/bootloader_check_size	c1540b00eb86926d
 9	241	0	C:/Users/h1576/Desktop/Roam/pe_code/pe_board/build/bootloader/esp-idf/esptool_py/CMakeFiles/bootloader_check_size	c1540b00eb86926d
+6	476	7896409840486460	.bin_timestamp	78b1962b2e62eae8
+6	476	7896409840486460	C:/Users/h1576/Desktop/Roam/pe_code/pe_board/build/bootloader/.bin_timestamp	78b1962b2e62eae8
+478	656	0	esp-idf/esptool_py/CMakeFiles/bootloader_check_size	2360b6896e891b2c
+478	656	0	C:/Users/h1576/Desktop/Roam/pe_code/pe_board/build/bootloader/esp-idf/esptool_py/CMakeFiles/bootloader_check_size	2360b6896e891b2c
